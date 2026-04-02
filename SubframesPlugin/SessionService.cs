@@ -123,7 +123,7 @@ public sealed class SessionService : IDisposable
                 ? DateTime.UtcNow.AddSeconds(-e.Duration).ToString("o")
                 : DateTime.UtcNow.ToString("o");
 
-            var filter = meta.FilterWheel?.Filter?.Name;
+            var filter = meta.FilterWheel?.Filter;
             var hfr = e.StarDetectionAnalysis?.HFR;
 
             // Update heartbeat snapshot atomically so the timer always reads consistent state.
@@ -136,8 +136,8 @@ public sealed class SessionService : IDisposable
                 ExposureTime = meta.Image?.ExposureTime ?? 0.0,
                 CapturedAt   = capturedAt,
                 Filter       = filter,
-                Gain         = meta.Camera?.Gain is double g ? (int)g : null,
-                Offset       = meta.Camera?.Offset is double o ? (int)o : null,
+                Gain         = meta.Camera?.Gain,
+                Offset       = meta.Camera?.Offset,
                 Binning      = meta.Camera?.BinX is int b ? (short)b : null,
                 Hfr          = hfr,
                 HfrStdev     = e.StarDetectionAnalysis?.HFRStDev,
