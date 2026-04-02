@@ -24,7 +24,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: nina-sdk
-          key: nina-sdk-3.1.2.9001
+          key: nina-sdk-3.1.2.9001-v2
 
       - name: Download NINA SDK from NuGet
         if: steps.cache-nina-sdk.outputs.cache-hit != 'true'
@@ -38,7 +38,8 @@ jobs:
             "nina.sequencer",
             "nina.astrometry",
             "nina.wpf.base",
-            "nina.profile"
+            "nina.profile",
+            "nina.image"
           )
           New-Item -ItemType Directory -Force -Path nina-sdk | Out-Null
           foreach ($pkg in $packages) {

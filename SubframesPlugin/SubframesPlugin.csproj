@@ -59,6 +59,10 @@
       <HintPath>$(NinaSdkPath)\NINA.Profile.dll</HintPath>
       <Private>false</Private>
     </Reference>
+    <Reference Include="NINA.Image">
+      <HintPath>$(NinaSdkPath)\NINA.Image.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
   </ItemGroup>
 
   <ItemGroup>
