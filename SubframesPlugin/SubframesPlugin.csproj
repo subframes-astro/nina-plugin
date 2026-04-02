@@ -8,7 +8,7 @@
     <PlatformTarget>x64</PlatformTarget>
     <AssemblyName>Subframes.NinaPlugin</AssemblyName>
     <RootNamespace>Subframes.NinaPlugin</RootNamespace>
-    <Version>0.1.0</Version>
+    <Version>0.1.3</Version>
     <Authors>Subframes</Authors>
     <Company>Subframes</Company>
     <AssemblyTitle>Subframes</AssemblyTitle>
