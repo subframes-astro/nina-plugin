@@ -1,6 +1,6 @@
 using NINA.Core.Model;
 using NINA.Core.Utility;
-using NINA.Equipment.Interfaces.Mediator;
+using NINA.WPF.Base.Interfaces.Mediator;
 using Subframes.NinaPlugin.Api;
 
 namespace Subframes.NinaPlugin;
@@ -19,7 +19,7 @@ namespace Subframes.NinaPlugin;
 /// </summary>
 public sealed class SessionService : IDisposable
 {
-    private readonly IImagingMediator _imagingMediator;
+    private readonly IImageSaveMediator _imageSaveMediator;
     private readonly SubframesClient _apiClient;
     private readonly PluginOptions _options;
 
@@ -37,17 +37,17 @@ public sealed class SessionService : IDisposable
     private sealed record HeartbeatSnapshot(string? Filter, double? LatestHfr, double? LatestRmsTotal);
 
     public SessionService(
-        IImagingMediator imagingMediator,
+        IImageSaveMediator imageSaveMediator,
         SubframesClient apiClient,
         PluginOptions options)
     {
-        _imagingMediator = imagingMediator;
+        _imageSaveMediator = imageSaveMediator;
         _apiClient = apiClient;
         _options = options;
 
         // Subscribe once; the handler fires for every saved image while NINA runs.
-        _imagingMediator.ImageSaved += OnImageSaved;
-        Logger.Debug("[Subframes] SessionService subscribed to ImageSaved.");
+        _imageSaveMediator.BeforeImageSaved += OnImageSaved;
+        Logger.Debug("[Subframes] SessionService subscribed to BeforeImageSaved.");
     }
 
     /// <summary>The server-assigned session ID, or null if no session is active.</summary>
@@ -101,9 +101,9 @@ public sealed class SessionService : IDisposable
         Logger.Info("[Subframes] Session cleared.");
     }
 
-    // ── ImageSaved handler ───────────────────────────────────────────────────
+    // ── BeforeImageSaved handler ─────────────────────────────────────────────
 
-    private void OnImageSaved(object? sender, ImageSavedEventArgs e)
+    private void OnImageSaved(object? sender, BeforeImageSavedEventArgs e)
     {
         var sessionId = _activeSessionId;
         if (sessionId is null) return;
@@ -112,7 +112,7 @@ public sealed class SessionService : IDisposable
         _ = PostFrameAsync(sessionId, e);
     }
 
-    private async Task PostFrameAsync(string sessionId, ImageSavedEventArgs e)
+    private async Task PostFrameAsync(string sessionId, BeforeImageSavedEventArgs e)
     {
         try
         {
@@ -127,7 +127,7 @@ public sealed class SessionService : IDisposable
             var hfr = e.StarDetectionAnalysis?.HFR;
 
             // Update heartbeat snapshot atomically so the timer always reads consistent state.
-            // RMS guiding data is not available from ImageSavedEventArgs; left null for now.
+            // RMS guiding data is not available from BeforeImageSavedEventArgs; left null for now.
             _snapshot = new HeartbeatSnapshot(filter, hfr, null);
 
             var frame = new FrameInput
@@ -209,7 +209,7 @@ public sealed class SessionService : IDisposable
     public void Dispose()
     {
         StopHeartbeatTimer();
-        _imagingMediator.ImageSaved -= OnImageSaved;
+        _imageSaveMediator.BeforeImageSaved -= OnImageSaved;
         _apiClient.Dispose();
         Logger.Debug("[Subframes] SessionService disposed.");
     }

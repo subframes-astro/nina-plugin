@@ -3,6 +3,7 @@ using System.Windows.Input;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using NINA.Core.Utility;
+using NINA.Equipment.Interfaces.ViewModel;
 using NINA.WPF.Base.ViewModel;
 
 namespace Subframes.NinaPlugin.UI;
