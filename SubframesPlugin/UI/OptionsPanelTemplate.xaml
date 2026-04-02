@@ -1,10 +1,11 @@
 <ResourceDictionary
+    x:Class="Subframes.NinaPlugin.UI.OptionsPanelTemplate"
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     xmlns:plugin="clr-namespace:Subframes.NinaPlugin"
     xmlns:ui="clr-namespace:Subframes.NinaPlugin.UI">
 
-    <DataTemplate DataType="{x:Type plugin:SubframesPlugin}">
+    <DataTemplate x:Key="Subframes_Options" DataType="{x:Type plugin:SubframesPlugin}">
         <ui:OptionsPanel DataContext="{Binding OptionsVM}" />
     </DataTemplate>
 

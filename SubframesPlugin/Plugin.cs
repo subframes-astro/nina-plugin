@@ -1,7 +1,5 @@
-using System;
 using System.ComponentModel.Composition;
 using System.Threading.Tasks;
-using System.Windows;
 using NINA.Core.Utility;
 using NINA.WPF.Base.Interfaces.Mediator;
 using NINA.Plugin;
@@ -36,17 +34,6 @@ public class SubframesPlugin : PluginBase, IPluginManifest
     // Expose singletons so MEF-constructed sequence items can import them.
     public SessionService SessionService => _sessionService;
     public OptionsPanelViewModel OptionsVM => _optionsVm;
-
-    public override ResourceDictionary Options
-    {
-        get
-        {
-            var dict = new ResourceDictionary();
-            dict.Source = new Uri(
-                "pack://application:,,,/Subframes.NinaPlugin;component/UI/OptionsPanelTemplate.xaml");
-            return dict;
-        }
-    }
 
     public override async Task Teardown()
     {
