@@ -4,6 +4,7 @@ using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using NINA.Core.Utility;
 using NINA.Equipment.Interfaces.ViewModel;
+using NINA.Profile.Interfaces;
 using NINA.WPF.Base.ViewModel;
 
 namespace Subframes.NinaPlugin.UI;
@@ -36,8 +37,8 @@ public partial class OptionsPanelViewModel : DockableVM
     private string _statusMessage = string.Empty;
 
     [ImportingConstructor]
-    public OptionsPanelViewModel(SubframesPlugin plugin)
-        : base(/* IProfileService injected by base */ null!)
+    public OptionsPanelViewModel(SubframesPlugin plugin, IProfileService profileService)
+        : base(profileService)
     {
         Title = "Subframes";
         _sessionService = plugin.SessionService;
