@@ -1,0 +1,65 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <PlatformTarget>x64</PlatformTarget>
+    <AssemblyName>Subframes.NinaPlugin</AssemblyName>
+    <RootNamespace>Subframes.NinaPlugin</RootNamespace>
+    <Version>0.1.0</Version>
+    <Authors>Subframes</Authors>
+    <Description>NINA plugin for Subframes — captures exposure data and posts to the Subframes API.</Description>
+  </PropertyGroup>
+
+  <!--
+    NINA SDK References
+    ==================
+    Set the NinaSdkPath property to point at your NINA installation (or an extracted SDK zip).
+    Default assumes a `lib\nina-sdk` folder next to this .csproj containing the NINA assemblies.
+
+    Override at build time:
+      msbuild /p:NinaSdkPath="C:\Program Files\N.I.N.A"
+    Or set the environment variable NINA_SDK_PATH before building.
+  -->
+  <PropertyGroup>
+    <NinaSdkPath Condition="'$(NinaSdkPath)' == '' And '$(NINA_SDK_PATH)' != ''">$(NINA_SDK_PATH)</NinaSdkPath>
+    <NinaSdkPath Condition="'$(NinaSdkPath)' == ''">$(MSBuildThisFileDirectory)lib\nina-sdk</NinaSdkPath>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Reference Include="NINA.Core">
+      <HintPath>$(NinaSdkPath)\NINA.Core.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="NINA.Plugin">
+      <HintPath>$(NinaSdkPath)\NINA.Plugin.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="NINA.Equipment">
+      <HintPath>$(NinaSdkPath)\NINA.Equipment.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="NINA.Sequencer">
+      <HintPath>$(NinaSdkPath)\NINA.Sequencer.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="NINA.Astrometry">
+      <HintPath>$(NinaSdkPath)\NINA.Astrometry.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="NINA.WPF.Base">
+      <HintPath>$(NinaSdkPath)\NINA.WPF.Base.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- System.ComponentModel.Composition for MEF exports -->
+    <PackageReference Include="System.ComponentModel.Composition" Version="8.*" />
+    <!-- MVVM source generators for [ObservableProperty], [RelayCommand] etc. -->
+    <PackageReference Include="CommunityToolkit.Mvvm" Version="8.*" />
+  </ItemGroup>
+
+</Project>

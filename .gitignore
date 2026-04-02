@@ -1,0 +1,20 @@
+## .NET
+bin/
+obj/
+*.user
+*.suo
+*.userprefs
+*.csproj.user
+
+## IDE
+.vs/
+.idea/
+*.swp
+*~
+
+## Build artifacts
+publish/
+out/
+
+## NINA SDK (local copy)
+SubframesPlugin/lib/nina-sdk/

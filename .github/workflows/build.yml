@@ -1,0 +1,88 @@
+name: Build
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+
+      - name: Download NINA SDK
+        shell: pwsh
+        run: |
+          $ninaVersion = "3.1.2.9001"
+          $url = "https://nighttime-imaging.eu/download/download.php?versionId=${ninaVersion}"
+          $zipPath = "$env:RUNNER_TEMP\nina.zip"
+          $extractPath = "$env:RUNNER_TEMP\nina-sdk"
+          Write-Host "Downloading NINA $ninaVersion..."
+          Invoke-WebRequest -Uri $url -OutFile $zipPath -UseBasicParsing
+          Expand-Archive -Path $zipPath -DestinationPath $extractPath -Force
+          # Find the directory containing NINA.Core.dll
+          $sdkDir = Get-ChildItem -Path $extractPath -Recurse -Filter "NINA.Core.dll" | Select-Object -First 1 | Split-Path
+          Write-Host "NINA SDK found at: $sdkDir"
+          echo "NINA_SDK_PATH=$sdkDir" >> $env:GITHUB_ENV
+
+      - name: Restore dependencies
+        run: dotnet restore SubframesPlugin/SubframesPlugin.csproj
+
+      - name: Build
+        run: dotnet build SubframesPlugin/SubframesPlugin.csproj -c Release --no-restore
+
+      - name: Run tests
+        run: dotnet test SubframesPlugin.Tests/SubframesPlugin.Tests.csproj -c Release --no-restore --verbosity normal
+
+      - name: Collect release artifacts
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: pwsh
+        run: |
+          $outDir = "release"
+          New-Item -ItemType Directory -Force -Path $outDir
+          Copy-Item "SubframesPlugin/bin/Release/net8.0-windows/Subframes.NinaPlugin.dll" $outDir/
+          # Include any transitive dependency DLLs that NINA doesn't already ship
+          $exclude = @("NINA.*.dll")
+          Get-ChildItem "SubframesPlugin/bin/Release/net8.0-windows/*.dll" |
+            Where-Object { $_.Name -ne "Subframes.NinaPlugin.dll" } |
+            Where-Object { $n = $_.Name; -not ($exclude | Where-Object { $n -like $_ }) } |
+            Copy-Item -Destination $outDir/
+
+      - name: Upload build artifacts
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: actions/upload-artifact@v4
+        with:
+          name: SubframesPlugin
+          path: release/
+
+  release:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: SubframesPlugin
+          path: release/
+
+      - name: Create zip
+        run: cd release && zip -r ../SubframesPlugin-${{ github.ref_name }}.zip .
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: SubframesPlugin-${{ github.ref_name }}.zip
+          generate_release_notes: true

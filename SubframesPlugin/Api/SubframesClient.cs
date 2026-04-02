@@ -1,0 +1,189 @@
+using System.Net.Http;
+using System.Net.Http.Headers;
+using System.Net.Http.Json;
+using System.Text.Json;
+using NINA.Core.Utility;
+
+namespace Subframes.NinaPlugin.Api;
+
+/// <summary>
+/// HTTP client for the Subframes ingest API.
+///
+/// All methods return null on failure and swallow exceptions — the caller must
+/// treat a null result as "API unreachable, data not recorded" without
+/// propagating an exception to the NINA sequence engine.
+///
+/// Authentication uses a Bearer token (API key with prefix astk_live_).
+/// </summary>
+public sealed class SubframesClient : IDisposable
+{
+    private static readonly JsonSerializerOptions JsonOptions = new()
+    {
+        PropertyNameCaseInsensitive = true
+    };
+
+    private readonly HttpClient _http;
+    private readonly PluginOptions _options;
+
+    public SubframesClient(PluginOptions options)
+    {
+        _options = options;
+        _http = new HttpClient
+        {
+            Timeout = TimeSpan.FromSeconds(10)
+        };
+    }
+
+    private string BaseUrl => _options.ApiBaseUrl.TrimEnd('/');
+
+    private void SetAuthHeader()
+    {
+        if (!string.IsNullOrWhiteSpace(_options.ApiKey))
+            _http.DefaultRequestHeaders.Authorization =
+                new AuthenticationHeaderValue("Bearer", _options.ApiKey);
+    }
+
+    // ── Session Start ────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Start a new imaging session.
+    /// Returns the server-assigned session ID, or null if the call failed.
+    /// </summary>
+    public async Task<string?> StartSessionAsync(
+        StartSessionRequest request,
+        CancellationToken ct = default)
+    {
+        if (!_options.IsEnabled) return null;
+
+        try
+        {
+            SetAuthHeader();
+            var url = $"{BaseUrl}/api/v1/ingest/session/start";
+            using var response = await _http.PostAsJsonAsync(url, request, JsonOptions, ct);
+            response.EnsureSuccessStatusCode();
+
+            var envelope = await response.Content
+                .ReadFromJsonAsync<ApiEnvelope<StartSessionData>>(JsonOptions, ct);
+            var sessionId = envelope?.Data?.SessionId;
+            Logger.Info($"[Subframes] Session started: {sessionId} for target '{request.TargetName}'");
+            return sessionId;
+        }
+        catch (OperationCanceledException)
+        {
+            return null;
+        }
+        catch (Exception ex)
+        {
+            Logger.Error($"[Subframes] StartSession failed: {ex.Message}");
+            return null;
+        }
+    }
+
+    // ── Session End ──────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// End an active imaging session.
+    /// </summary>
+    public async Task EndSessionAsync(
+        string sessionId,
+        CancellationToken ct = default)
+    {
+        if (!_options.IsEnabled) return;
+
+        try
+        {
+            SetAuthHeader();
+            var url = $"{BaseUrl}/api/v1/ingest/session/end";
+            var body = new EndSessionRequest
+            {
+                SessionId = sessionId,
+                EndTime = DateTime.UtcNow.ToString("o")
+            };
+            using var response = await _http.PostAsJsonAsync(url, body, JsonOptions, ct);
+            response.EnsureSuccessStatusCode();
+            Logger.Info($"[Subframes] Session ended: {sessionId}");
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception ex)
+        {
+            Logger.Warning($"[Subframes] EndSession failed (session={sessionId}): {ex.Message}");
+        }
+    }
+
+    // ── Heartbeat ────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Fire-and-forget session heartbeat. Uses a dedicated 5-second timeout
+    /// so a slow server never blocks the caller.
+    /// </summary>
+    public async Task SendHeartbeatAsync(
+        HeartbeatRequest request,
+        CancellationToken ct = default)
+    {
+        if (!_options.IsEnabled) return;
+
+        using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        cts.CancelAfter(TimeSpan.FromSeconds(5));
+
+        try
+        {
+            SetAuthHeader();
+            var url = $"{BaseUrl}/api/v1/ingest/heartbeat";
+            using var response = await _http.PostAsJsonAsync(url, request, JsonOptions, cts.Token);
+            response.EnsureSuccessStatusCode();
+            Logger.Debug($"[Subframes] Heartbeat sent for session {request.SessionId}");
+        }
+        catch (OperationCanceledException)
+        {
+            Logger.Warning($"[Subframes] Heartbeat timed out (session={request.SessionId})");
+        }
+        catch (Exception ex)
+        {
+            Logger.Warning($"[Subframes] Heartbeat failed (session={request.SessionId}): {ex.Message}");
+        }
+    }
+
+    // ── Frame Ingest ─────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Ingest a batch of frames for an active session.
+    /// Returns accepted count, or null on failure.
+    /// </summary>
+    public async Task<IngestFramesData?> IngestFramesAsync(
+        string sessionId,
+        List<FrameInput> frames,
+        CancellationToken ct = default)
+    {
+        if (!_options.IsEnabled) return null;
+
+        try
+        {
+            SetAuthHeader();
+            var url = $"{BaseUrl}/api/v1/ingest/frame";
+            var body = new IngestFramesRequest
+            {
+                SessionId = sessionId,
+                Frames = frames
+            };
+            using var response = await _http.PostAsJsonAsync(url, body, JsonOptions, ct);
+            response.EnsureSuccessStatusCode();
+
+            var envelope = await response.Content
+                .ReadFromJsonAsync<ApiEnvelope<IngestFramesData>>(JsonOptions, ct);
+            var data = envelope?.Data;
+            Logger.Debug($"[Subframes] Frames ingested: accepted={data?.Accepted} rejected={data?.Rejected}");
+            return data;
+        }
+        catch (OperationCanceledException)
+        {
+            return null;
+        }
+        catch (Exception ex)
+        {
+            Logger.Warning($"[Subframes] IngestFrames failed (session={sessionId}): {ex.Message}");
+            return null;
+        }
+    }
+
+    public void Dispose() => _http.Dispose();
+}
