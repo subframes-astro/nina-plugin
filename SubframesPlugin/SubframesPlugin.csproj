@@ -10,6 +10,8 @@
     <RootNamespace>Subframes.NinaPlugin</RootNamespace>
     <Version>0.1.0</Version>
     <Authors>Subframes</Authors>
+    <Company>Subframes</Company>
+    <AssemblyTitle>Subframes</AssemblyTitle>
     <Description>NINA plugin for Subframes — captures exposure data and posts to the Subframes API.</Description>
   </PropertyGroup>
 
@@ -64,6 +66,17 @@
     <PackageReference Include="System.ComponentModel.Composition" Version="8.*" />
     <!-- MVVM source generators for [ObservableProperty], [RelayCommand] etc. -->
     <PackageReference Include="CommunityToolkit.Mvvm" Version="8.*" />
+  </ItemGroup>
+
+  <!-- Assembly attributes consumed by NINA's PluginBase to populate manifest metadata -->
+  <ItemGroup>
+    <AssemblyAttribute Include="System.Runtime.InteropServices.GuidAttribute">
+      <_Parameter1>com.subframes.nina-plugin</_Parameter1>
+    </AssemblyAttribute>
+    <AssemblyAttribute Include="System.Reflection.AssemblyMetadataAttribute">
+      <_Parameter1>MinimumApplicationVersion</_Parameter1>
+      <_Parameter2>3.1.0.0</_Parameter2>
+    </AssemblyAttribute>
   </ItemGroup>
 
 </Project>

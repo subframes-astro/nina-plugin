@@ -46,8 +46,8 @@ public sealed class SessionService : IDisposable
         _options = options;
 
         // Subscribe once; the handler fires for every saved image while NINA runs.
-        _imageSaveMediator.BeforeImageSaved += OnImageSaved;
-        Logger.Debug("[Subframes] SessionService subscribed to BeforeImageSaved.");
+        _imageSaveMediator.ImageSaved += OnImageSaved;
+        Logger.Debug("[Subframes] SessionService subscribed to ImageSaved.");
     }
 
     /// <summary>The server-assigned session ID, or null if no session is active.</summary>
@@ -101,34 +101,33 @@ public sealed class SessionService : IDisposable
         Logger.Info("[Subframes] Session cleared.");
     }
 
-    // ── BeforeImageSaved handler ─────────────────────────────────────────────
+    // ── ImageSaved handler ───────────────────────────────────────────────────
 
-    private Task OnImageSaved(object? sender, BeforeImageSavedEventArgs e)
+    private void OnImageSaved(object? sender, ImageSavedEventArgs e)
     {
         var sessionId = _activeSessionId;
-        if (sessionId is null) return Task.CompletedTask;
+        if (sessionId is null) return;
 
         // Fire-and-forget, but capture exceptions so nothing leaks to NINA.
         _ = PostFrameAsync(sessionId, e);
-        return Task.CompletedTask;
     }
 
-    private async Task PostFrameAsync(string sessionId, BeforeImageSavedEventArgs e)
+    private async Task PostFrameAsync(string sessionId, ImageSavedEventArgs e)
     {
         try
         {
             var meta = e.MetaData;
             var frameNumber = Interlocked.Increment(ref _frameCounter);
 
-            var capturedAt = e.Duration > TimeSpan.Zero
-                ? DateTime.UtcNow.Subtract(e.Duration).ToString("o")
+            var capturedAt = e.Duration > 0
+                ? DateTime.UtcNow.AddSeconds(-e.Duration).ToString("o")
                 : DateTime.UtcNow.ToString("o");
 
             var filter = meta.FilterWheel?.Filter?.Name;
             var hfr = e.StarDetectionAnalysis?.HFR;
 
             // Update heartbeat snapshot atomically so the timer always reads consistent state.
-            // RMS guiding data is not available from BeforeImageSavedEventArgs; left null for now.
+            // RMS guiding data is not available from ImageSavedEventArgs; left null for now.
             _snapshot = new HeartbeatSnapshot(filter, hfr, null);
 
             var frame = new FrameInput
@@ -210,7 +209,7 @@ public sealed class SessionService : IDisposable
     public void Dispose()
     {
         StopHeartbeatTimer();
-        _imageSaveMediator.BeforeImageSaved -= OnImageSaved;
+        _imageSaveMediator.ImageSaved -= OnImageSaved;
         _apiClient.Dispose();
         Logger.Debug("[Subframes] SessionService disposed.");
     }
