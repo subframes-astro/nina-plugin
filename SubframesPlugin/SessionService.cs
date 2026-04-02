@@ -103,13 +103,14 @@ public sealed class SessionService : IDisposable
 
     // ── BeforeImageSaved handler ─────────────────────────────────────────────
 
-    private void OnImageSaved(object? sender, BeforeImageSavedEventArgs e)
+    private Task OnImageSaved(object? sender, BeforeImageSavedEventArgs e)
     {
         var sessionId = _activeSessionId;
-        if (sessionId is null) return;
+        if (sessionId is null) return Task.CompletedTask;
 
         // Fire-and-forget, but capture exceptions so nothing leaks to NINA.
         _ = PostFrameAsync(sessionId, e);
+        return Task.CompletedTask;
     }
 
     private async Task PostFrameAsync(string sessionId, BeforeImageSavedEventArgs e)

@@ -53,6 +53,10 @@
       <HintPath>$(NinaSdkPath)\NINA.WPF.Base.dll</HintPath>
       <Private>false</Private>
     </Reference>
+    <Reference Include="NINA.Profile">
+      <HintPath>$(NinaSdkPath)\NINA.Profile.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
   </ItemGroup>
 
   <ItemGroup>
