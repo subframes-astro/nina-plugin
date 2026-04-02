@@ -38,11 +38,4 @@ public class SubframesPlugin : PluginBase, IPluginManifest
 
     // Expose singletons so MEF-constructed sequence items can import them.
     public SessionService SessionService => _sessionService;
-
-    public override void Dispose()
-    {
-        _sessionService.Dispose();
-        Logger.Info("[Subframes] Plugin unloaded.");
-        base.Dispose();
-    }
 }
