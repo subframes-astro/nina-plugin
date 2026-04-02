@@ -1,8 +1,10 @@
 using System.ComponentModel.Composition;
 using System.Windows.Input;
+using System.Windows.Media;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using NINA.Core.Utility;
+using Subframes.NinaPlugin.Api;
 
 namespace Subframes.NinaPlugin.UI;
 
@@ -16,6 +18,7 @@ namespace Subframes.NinaPlugin.UI;
 ///   - InstanceName  — user-editable friendly name for this NINA instance
 ///   - SaveCommand   — persists settings to disk
 ///   - StatusMessage — live status string showing the active session ID (if any)
+///   - CheckApiConnectionCommand — tests connectivity to the configured API server
 /// </summary>
 public partial class OptionsPanelViewModel : ObservableObject
 {
@@ -39,6 +42,15 @@ public partial class OptionsPanelViewModel : ObservableObject
 
     [ObservableProperty]
     private string _statusMessage = string.Empty;
+
+    [ObservableProperty]
+    private string _apiStatusText = string.Empty;
+
+    [ObservableProperty]
+    private SolidColorBrush _apiStatusBrush = new(Colors.Gray);
+
+    [ObservableProperty]
+    private bool _isCheckingApi;
 
     public OptionsPanelViewModel(SubframesPlugin plugin)
     {
@@ -71,6 +83,50 @@ public partial class OptionsPanelViewModel : ObservableObject
 
     [RelayCommand]
     private void Refresh() => RefreshStatus();
+
+    [RelayCommand]
+    private async Task CheckApiConnectionAsync()
+    {
+        if (string.IsNullOrWhiteSpace(ApiBaseUrl))
+        {
+            ApiStatusText = "No URL configured";
+            ApiStatusBrush = new SolidColorBrush(Colors.Gray);
+            return;
+        }
+
+        IsCheckingApi = true;
+        ApiStatusText = "Checking...";
+        ApiStatusBrush = new SolidColorBrush(Colors.Gray);
+
+        try
+        {
+            var connected = await SubframesClient.CheckHealthAsync(
+                ApiBaseUrl.Trim(), ApiKey?.Trim() ?? string.Empty);
+
+            if (connected)
+            {
+                ApiStatusText = "Connected";
+                ApiStatusBrush = new SolidColorBrush(Color.FromRgb(0x22, 0xC5, 0x5E)); // green
+                Logger.Info($"[Subframes] API health check passed: {ApiBaseUrl.Trim()}");
+            }
+            else
+            {
+                ApiStatusText = "Disconnected";
+                ApiStatusBrush = new SolidColorBrush(Color.FromRgb(0xEF, 0x44, 0x44)); // red
+                Logger.Warning($"[Subframes] API health check failed: {ApiBaseUrl.Trim()}");
+            }
+        }
+        catch (Exception ex)
+        {
+            ApiStatusText = "Error";
+            ApiStatusBrush = new SolidColorBrush(Color.FromRgb(0xEF, 0x44, 0x44)); // red
+            Logger.Error($"[Subframes] API health check error: {ex.Message}");
+        }
+        finally
+        {
+            IsCheckingApi = false;
+        }
+    }
 
     // ── Helpers ───────────────────────────────────────────────────────────────
 

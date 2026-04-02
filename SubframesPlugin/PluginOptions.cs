@@ -22,7 +22,7 @@ public class PluginOptions
     };
 
     /// <summary>Base URL for the Subframes API, e.g. http://localhost:8080</summary>
-    public string ApiBaseUrl { get; set; } = "http://localhost:8080";
+    public string ApiBaseUrl { get; set; } = "https://api.subframes.io";
 
     /// <summary>API key for authenticating with the Subframes API (prefix: astk_live_).</summary>
     public string ApiKey { get; set; } = string.Empty;

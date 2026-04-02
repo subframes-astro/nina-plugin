@@ -185,5 +185,34 @@ public sealed class SubframesClient : IDisposable
         }
     }
 
+    // ── Health Check ───────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Check API connectivity by hitting GET /health.
+    /// Uses the provided URL and API key so the user can test before saving.
+    /// Returns true if the server responds with 2xx.
+    /// </summary>
+    public static async Task<bool> CheckHealthAsync(
+        string baseUrl,
+        string apiKey,
+        CancellationToken ct = default)
+    {
+        using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(5) };
+        if (!string.IsNullOrWhiteSpace(apiKey))
+            http.DefaultRequestHeaders.Authorization =
+                new AuthenticationHeaderValue("Bearer", apiKey);
+
+        try
+        {
+            var url = $"{baseUrl.TrimEnd('/')}/health";
+            using var response = await http.GetAsync(url, ct);
+            return response.IsSuccessStatusCode;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
     public void Dispose() => _http.Dispose();
 }
