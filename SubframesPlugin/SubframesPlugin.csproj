@@ -70,8 +70,9 @@
 
   <!-- Assembly attributes consumed by NINA's PluginBase to populate manifest metadata -->
   <ItemGroup>
+    <!-- GUID uniquely identifies this plugin to NINA's plugin system -->
     <AssemblyAttribute Include="System.Runtime.InteropServices.GuidAttribute">
-      <_Parameter1>com.subframes.nina-plugin</_Parameter1>
+      <_Parameter1>3ae05d9d-f170-5182-a0c1-75c76a1154f4</_Parameter1>
     </AssemblyAttribute>
     <AssemblyAttribute Include="System.Reflection.AssemblyMetadataAttribute">
       <_Parameter1>MinimumApplicationVersion</_Parameter1>
