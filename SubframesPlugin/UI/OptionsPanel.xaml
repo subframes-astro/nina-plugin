@@ -16,7 +16,7 @@
             FontWeight="SemiBold"
             FontSize="14"
             Margin="0,0,0,12"
-            Foreground="{StaticResource PrimaryBrush}" />
+            Foreground="{DynamicResource PrimaryBrush}" />
 
         <!-- Enable/Disable toggle -->
         <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
@@ -30,7 +30,7 @@
         <TextBlock
             Text="API Base URL"
             Margin="0,0,0,4"
-            Foreground="{StaticResource PrimaryBrush}" />
+            Foreground="{DynamicResource PrimaryBrush}" />
         <TextBox
             Text="{Binding ApiBaseUrl, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
             IsEnabled="{Binding IsEnabled}"
@@ -41,7 +41,7 @@
         <TextBlock
             Text="API Key"
             Margin="0,0,0,4"
-            Foreground="{StaticResource PrimaryBrush}" />
+            Foreground="{DynamicResource PrimaryBrush}" />
         <PasswordBox
             x:Name="ApiKeyBox"
             IsEnabled="{Binding IsEnabled}"
@@ -53,7 +53,7 @@
         <TextBlock
             Text="Instance ID"
             Margin="0,0,0,4"
-            Foreground="{StaticResource PrimaryBrush}" />
+            Foreground="{DynamicResource PrimaryBrush}" />
         <TextBox
             Text="{Binding InstanceId, Mode=OneWay}"
             IsReadOnly="True"
@@ -63,7 +63,7 @@
         <TextBlock
             Text="Instance Name"
             Margin="0,0,0,4"
-            Foreground="{StaticResource PrimaryBrush}" />
+            Foreground="{DynamicResource PrimaryBrush}" />
         <TextBox
             Text="{Binding InstanceName, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
             IsEnabled="{Binding IsEnabled}"
@@ -86,11 +86,11 @@
             Text="Session Status"
             FontWeight="SemiBold"
             Margin="0,0,0,4"
-            Foreground="{StaticResource PrimaryBrush}" />
+            Foreground="{DynamicResource PrimaryBrush}" />
         <StackPanel Orientation="Horizontal">
             <TextBlock
                 Text="{Binding StatusMessage}"
-                Foreground="{StaticResource SecondaryBrush}"
+                Foreground="{DynamicResource SecondaryBrush}"
                 VerticalAlignment="Center"
                 Margin="0,0,8,0" />
             <Button

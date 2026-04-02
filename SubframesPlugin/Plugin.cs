@@ -6,7 +6,6 @@ using NINA.Core.Utility;
 using NINA.WPF.Base.Interfaces.Mediator;
 using NINA.Plugin;
 using NINA.Plugin.Interfaces;
-using NINA.Profile.Interfaces;
 using Subframes.NinaPlugin.Api;
 using Subframes.NinaPlugin.UI;
 
@@ -25,12 +24,12 @@ public class SubframesPlugin : PluginBase, IPluginManifest
     private readonly OptionsPanelViewModel _optionsVm;
 
     [ImportingConstructor]
-    public SubframesPlugin(IImageSaveMediator imageSaveMediator, IProfileService profileService)
+    public SubframesPlugin(IImageSaveMediator imageSaveMediator)
     {
         var options = PluginOptions.Load();
         var apiClient = new SubframesClient(options);
         _sessionService = new SessionService(imageSaveMediator, apiClient, options);
-        _optionsVm = new OptionsPanelViewModel(this, profileService);
+        _optionsVm = new OptionsPanelViewModel(this);
         Logger.Info("[Subframes] Plugin loaded.");
     }
 

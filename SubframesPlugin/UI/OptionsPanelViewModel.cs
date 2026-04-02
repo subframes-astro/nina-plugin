@@ -3,9 +3,6 @@ using System.Windows.Input;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using NINA.Core.Utility;
-using NINA.Equipment.Interfaces.ViewModel;
-using NINA.Profile.Interfaces;
-using NINA.WPF.Base.ViewModel;
 
 namespace Subframes.NinaPlugin.UI;
 
@@ -20,7 +17,7 @@ namespace Subframes.NinaPlugin.UI;
 ///   - SaveCommand   — persists settings to disk
 ///   - StatusMessage — live status string showing the active session ID (if any)
 /// </summary>
-public partial class OptionsPanelViewModel : DockableVM
+public partial class OptionsPanelViewModel : ObservableObject
 {
     private readonly PluginOptions _options;
     private readonly SessionService _sessionService;
@@ -43,10 +40,8 @@ public partial class OptionsPanelViewModel : DockableVM
     [ObservableProperty]
     private string _statusMessage = string.Empty;
 
-    public OptionsPanelViewModel(SubframesPlugin plugin, IProfileService profileService)
-        : base(profileService)
+    public OptionsPanelViewModel(SubframesPlugin plugin)
     {
-        Title = "Subframes";
         _sessionService = plugin.SessionService;
 
         // Load from disk.
