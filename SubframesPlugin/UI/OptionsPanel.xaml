@@ -49,6 +49,27 @@
             Margin="0,0,0,12"
             PasswordChanged="ApiKeyBox_PasswordChanged" />
 
+        <!-- Instance ID (read-only) -->
+        <TextBlock
+            Text="Instance ID"
+            Margin="0,0,0,4"
+            Foreground="{StaticResource PrimaryBrush}" />
+        <TextBox
+            Text="{Binding InstanceId, Mode=OneWay}"
+            IsReadOnly="True"
+            Margin="0,0,0,12" />
+
+        <!-- Instance Name -->
+        <TextBlock
+            Text="Instance Name"
+            Margin="0,0,0,4"
+            Foreground="{StaticResource PrimaryBrush}" />
+        <TextBox
+            Text="{Binding InstanceName, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+            IsEnabled="{Binding IsEnabled}"
+            ToolTip="Friendly name for this NINA instance (e.g. Main Scope, Widefield Rig)"
+            Margin="0,0,0,12" />
+
         <!-- Save button -->
         <Button
             Content="Save Settings"

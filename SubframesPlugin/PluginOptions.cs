@@ -30,6 +30,12 @@ public class PluginOptions
     /// <summary>Whether to send data to the API (can be toggled in the UI).</summary>
     public bool IsEnabled { get; set; } = true;
 
+    /// <summary>Stable identifier for this NINA instance, auto-generated on first run.</summary>
+    public string InstanceId { get; set; } = string.Empty;
+
+    /// <summary>Friendly name for this NINA instance (e.g. "Main Scope", "Widefield Rig").</summary>
+    public string InstanceName { get; set; } = string.Empty;
+
     // ── Persistence ──────────────────────────────────────────────────────────
 
     /// <summary>Load settings from disk, or return defaults if not present.</summary>
@@ -40,15 +46,23 @@ public class PluginOptions
             if (File.Exists(SettingsPath))
             {
                 var json = File.ReadAllText(SettingsPath);
-                return JsonSerializer.Deserialize<PluginOptions>(json, SerializerOptions)
-                       ?? new PluginOptions();
+                var opts = JsonSerializer.Deserialize<PluginOptions>(json, SerializerOptions)
+                           ?? new PluginOptions();
+                if (string.IsNullOrEmpty(opts.InstanceId))
+                {
+                    opts.InstanceId = Guid.NewGuid().ToString();
+                    opts.Save();
+                }
+                return opts;
             }
         }
         catch (Exception ex)
         {
             Logger.Error($"[Subframes] Failed to load settings: {ex.Message}");
         }
-        return new PluginOptions();
+        var defaults = new PluginOptions { InstanceId = Guid.NewGuid().ToString() };
+        defaults.Save();
+        return defaults;
     }
 
     /// <summary>Persist settings to disk.</summary>

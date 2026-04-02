@@ -42,6 +42,14 @@ public sealed class StartSessionRequest
     [JsonPropertyName("bortleZone")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public short? BortleZone { get; init; }
+
+    [JsonPropertyName("instanceId")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? InstanceId { get; init; }
+
+    [JsonPropertyName("instanceName")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? InstanceName { get; init; }
 }
 
 /// <summary>Body for POST /api/v1/ingest/session/end</summary>
@@ -88,6 +96,14 @@ public sealed class HeartbeatRequest
 
     [JsonPropertyName("uptimeMinutes")]
     public int UptimeMinutes { get; init; }
+
+    [JsonPropertyName("instanceId")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? InstanceId { get; init; }
+
+    [JsonPropertyName("instanceName")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? InstanceName { get; init; }
 }
 
 /// <summary>Body for POST /api/v1/ingest/frame</summary>

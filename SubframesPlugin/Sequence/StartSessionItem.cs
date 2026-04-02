@@ -66,12 +66,15 @@ public partial class StartSessionItem : SequenceItem, IValidatable
             Status = $"Subframes: starting session for '{TargetName}'..."
         });
 
+        var options = PluginOptions.Load();
         var request = new StartSessionRequest
         {
-            TargetName = CatalogNameNormalizer.Normalize(TargetName),
-            TargetRa   = TargetRa,
-            TargetDec  = TargetDec,
-            StartTime  = DateTime.UtcNow.ToString("o")
+            TargetName   = CatalogNameNormalizer.Normalize(TargetName),
+            TargetRa     = TargetRa,
+            TargetDec    = TargetDec,
+            StartTime    = DateTime.UtcNow.ToString("o"),
+            InstanceId   = string.IsNullOrWhiteSpace(options.InstanceId) ? null : options.InstanceId,
+            InstanceName = string.IsNullOrWhiteSpace(options.InstanceName) ? null : options.InstanceName,
         };
 
         var sessionId = await _sessionService.StartSessionAsync(request, ct);

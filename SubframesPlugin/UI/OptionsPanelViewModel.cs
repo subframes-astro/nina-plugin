@@ -10,15 +10,16 @@ using NINA.WPF.Base.ViewModel;
 namespace Subframes.NinaPlugin.UI;
 
 /// <summary>
-/// ViewModel for the Subframes plugin settings dockable panel.
+/// ViewModel for the Subframes plugin settings panel.
 ///
 /// Exposes:
-///   - ApiBaseUrl  — user-editable text field
-///   - IsEnabled   — enable/disable data posting without removing the item
-///   - SaveCommand — persists settings to disk
-///   - SessionInfo — live status string showing the active session ID (if any)
+///   - ApiBaseUrl    — user-editable text field
+///   - IsEnabled     — enable/disable data posting without removing the item
+///   - InstanceId    — read-only stable identifier for this NINA instance
+///   - InstanceName  — user-editable friendly name for this NINA instance
+///   - SaveCommand   — persists settings to disk
+///   - StatusMessage — live status string showing the active session ID (if any)
 /// </summary>
-[Export(typeof(IDockableVM))]
 public partial class OptionsPanelViewModel : DockableVM
 {
     private readonly PluginOptions _options;
@@ -34,9 +35,14 @@ public partial class OptionsPanelViewModel : DockableVM
     private bool _isEnabled;
 
     [ObservableProperty]
+    private string _instanceId = string.Empty;
+
+    [ObservableProperty]
+    private string _instanceName = string.Empty;
+
+    [ObservableProperty]
     private string _statusMessage = string.Empty;
 
-    [ImportingConstructor]
     public OptionsPanelViewModel(SubframesPlugin plugin, IProfileService profileService)
         : base(profileService)
     {
@@ -48,6 +54,8 @@ public partial class OptionsPanelViewModel : DockableVM
         ApiBaseUrl = _options.ApiBaseUrl;
         ApiKey = _options.ApiKey;
         IsEnabled = _options.IsEnabled;
+        InstanceId = _options.InstanceId;
+        InstanceName = _options.InstanceName;
 
         RefreshStatus();
     }
@@ -60,6 +68,7 @@ public partial class OptionsPanelViewModel : DockableVM
         _options.ApiBaseUrl = ApiBaseUrl.Trim();
         _options.ApiKey = ApiKey.Trim();
         _options.IsEnabled = IsEnabled;
+        _options.InstanceName = InstanceName.Trim();
         _options.Save();
         StatusMessage = "Settings saved.";
         Logger.Info($"[Subframes] Settings saved — API URL: {_options.ApiBaseUrl}  Enabled: {_options.IsEnabled}");

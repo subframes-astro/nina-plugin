@@ -183,14 +183,16 @@ public sealed class SessionService : IDisposable
                 var snap = _snapshot;
                 var payload = new HeartbeatRequest
                 {
-                    SessionId    = sessionId,
-                    Status       = "imaging",
-                    CurrentTarget = _currentTarget,
-                    CurrentFilter = snap.Filter,
-                    ExposureCount = _frameCounter,
-                    LatestHfr    = snap.LatestHfr,
+                    SessionId      = sessionId,
+                    Status         = "imaging",
+                    CurrentTarget  = _currentTarget,
+                    CurrentFilter  = snap.Filter,
+                    ExposureCount  = _frameCounter,
+                    LatestHfr      = snap.LatestHfr,
                     LatestRmsTotal = snap.LatestRmsTotal,
-                    UptimeMinutes = (int)(DateTime.UtcNow - _sessionStartTime).TotalMinutes,
+                    UptimeMinutes  = (int)(DateTime.UtcNow - _sessionStartTime).TotalMinutes,
+                    InstanceId     = string.IsNullOrWhiteSpace(_options.InstanceId) ? null : _options.InstanceId,
+                    InstanceName   = string.IsNullOrWhiteSpace(_options.InstanceName) ? null : _options.InstanceName,
                 };
                 // Fire-and-forget — never block the timer loop on a slow network.
                 _ = _apiClient.SendHeartbeatAsync(payload, CancellationToken.None);
