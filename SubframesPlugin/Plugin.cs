@@ -14,6 +14,7 @@ namespace Subframes.NinaPlugin;
 /// by PluginBase — see SubframesPlugin.csproj and Properties/AssemblyInfo.cs.
 /// </summary>
 [Export(typeof(IPluginManifest))]
+[Export(typeof(SubframesPlugin))]
 public class SubframesPlugin : PluginBase, IPluginManifest
 {
     private readonly SessionService _sessionService;
