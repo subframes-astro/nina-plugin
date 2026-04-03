@@ -2,6 +2,7 @@ using System.ComponentModel.Composition;
 using CommunityToolkit.Mvvm.ComponentModel;
 using NINA.Core.Model;
 using NINA.Core.Utility;
+using NINA.Profile.Interfaces;
 using NINA.Sequencer.SequenceItem;
 using NINA.Sequencer.Validations;
 using Subframes.NinaPlugin.Api;
@@ -30,6 +31,7 @@ namespace Subframes.NinaPlugin.Sequence;
 public partial class StartSessionItem : SequenceItem, IValidatable
 {
     private readonly SessionService _sessionService;
+    private readonly IProfileService _profileService;
 
     [ObservableProperty]
     private string _targetName = "Unknown Target";
@@ -41,15 +43,17 @@ public partial class StartSessionItem : SequenceItem, IValidatable
     private double _targetDec;
 
     [ImportingConstructor]
-    public StartSessionItem(SubframesPlugin plugin)
+    public StartSessionItem(SubframesPlugin plugin, IProfileService profileService)
     {
         _sessionService = plugin.SessionService;
+        _profileService = profileService;
     }
 
     // Copy constructor for Clone().
     private StartSessionItem(StartSessionItem other) : base(other)
     {
         _sessionService = other._sessionService;
+        _profileService = other._profileService;
         _targetName = other._targetName;
         _targetRa = other._targetRa;
         _targetDec = other._targetDec;
@@ -67,14 +71,22 @@ public partial class StartSessionItem : SequenceItem, IValidatable
         });
 
         var options = PluginOptions.Load();
+
+        var lat = _profileService.ActiveProfile.AstrometrySettings.Latitude;
+        var lon = _profileService.ActiveProfile.AstrometrySettings.Longitude;
+        var hasLocation = !(lat == 0.0 && lon == 0.0);
+
         var request = new StartSessionRequest
         {
-            TargetName   = CatalogNameNormalizer.Normalize(TargetName),
-            TargetRa     = TargetRa,
-            TargetDec    = TargetDec,
-            StartTime    = DateTime.UtcNow.ToString("o"),
-            InstanceId   = string.IsNullOrWhiteSpace(options.InstanceId) ? null : options.InstanceId,
-            InstanceName = string.IsNullOrWhiteSpace(options.InstanceName) ? null : options.InstanceName,
+            TargetName    = CatalogNameNormalizer.Normalize(TargetName),
+            TargetRa      = TargetRa,
+            TargetDec     = TargetDec,
+            StartTime     = DateTime.UtcNow.ToString("o"),
+            InstanceId    = string.IsNullOrWhiteSpace(options.InstanceId) ? null : options.InstanceId,
+            InstanceName  = string.IsNullOrWhiteSpace(options.InstanceName) ? null : options.InstanceName,
+            LocationLat   = hasLocation ? lat : null,
+            LocationLon   = hasLocation ? lon : null,
+            LocationLabel = hasLocation ? _profileService.ActiveProfile.Name : null,
         };
 
         var sessionId = await _sessionService.StartSessionAsync(request, ct);
