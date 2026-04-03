@@ -24,6 +24,7 @@ public partial class OptionsPanelViewModel : ObservableObject
 {
     private readonly PluginOptions _options;
     private readonly SessionService _sessionService;
+    private readonly SubframesPlugin _plugin;
 
     [ObservableProperty]
     private string _apiBaseUrl = string.Empty;
@@ -54,10 +55,12 @@ public partial class OptionsPanelViewModel : ObservableObject
 
     public OptionsPanelViewModel(SubframesPlugin plugin)
     {
+        _plugin = plugin;
         _sessionService = plugin.SessionService;
 
-        // Load from disk.
-        _options = PluginOptions.Load();
+        // Use the shared options instance from the plugin so that saved changes
+        // are immediately visible to SubframesClient (avoids stale-key 401s).
+        _options = plugin.Options;
         ApiBaseUrl = _options.ApiBaseUrl;
         ApiKey = _options.ApiKey;
         IsEnabled = _options.IsEnabled;
@@ -77,6 +80,7 @@ public partial class OptionsPanelViewModel : ObservableObject
         _options.IsEnabled = IsEnabled;
         _options.InstanceName = InstanceName.Trim();
         _options.Save();
+        _plugin.ApplyOptionsChange();
         StatusMessage = "Settings saved.";
         Logger.Info($"[Subframes] Settings saved — API URL: {_options.ApiBaseUrl}  Enabled: {_options.IsEnabled}");
     }

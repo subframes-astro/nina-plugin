@@ -54,6 +54,24 @@ public class SubframesPlugin : PluginBase, IPluginManifest
     public SessionService SessionService => _sessionService;
     public OptionsPanelViewModel OptionsVM => _optionsVm;
 
+    /// <summary>
+    /// The shared plugin options instance. OptionsPanelViewModel uses this directly
+    /// so that saved changes are immediately visible to SubframesClient.
+    /// </summary>
+    public PluginOptions Options => _options;
+
+    /// <summary>
+    /// Called by OptionsPanelViewModel after saving settings.
+    /// Starts or stops the station heartbeat loop based on the current options.
+    /// </summary>
+    internal void ApplyOptionsChange()
+    {
+        if (_options.IsEnabled && !string.IsNullOrWhiteSpace(_options.ApiKey))
+            StartStationHeartbeat();
+        else
+            StopStationHeartbeat();
+    }
+
     public override async Task Teardown()
     {
         StopStationHeartbeat();
