@@ -36,6 +36,9 @@ public sealed class SessionService : IDisposable
 
     private sealed record HeartbeatSnapshot(string? Filter, double? LatestHfr, double? LatestRmsTotal);
 
+    /// <summary>Replace non-finite doubles (NaN, ±Infinity) with null so JSON serialization never throws.</summary>
+    private static double? Finite(double? v) => v is double d && double.IsFinite(d) ? v : null;
+
     public SessionService(
         IImageSaveMediator imageSaveMediator,
         SubframesClient apiClient,
@@ -131,7 +134,7 @@ public sealed class SessionService : IDisposable
 
             // Update heartbeat snapshot atomically so the timer always reads consistent state.
             // RMS guiding data is not available from ImageSavedEventArgs; left null for now.
-            _snapshot = new HeartbeatSnapshot(filter, hfr, null);
+            _snapshot = new HeartbeatSnapshot(filter, Finite(hfr), null);
 
             var frame = new FrameInput
             {
@@ -142,10 +145,10 @@ public sealed class SessionService : IDisposable
                 Gain         = meta.Camera?.Gain,
                 Offset       = meta.Camera?.Offset,
                 Binning      = meta.Camera?.BinX is int b ? (short)b : null,
-                Hfr          = hfr,
-                HfrStdev     = e.StarDetectionAnalysis?.HFRStDev,
+                Hfr          = Finite(hfr),
+                HfrStdev     = Finite(e.StarDetectionAnalysis?.HFRStDev),
                 StarCount    = e.StarDetectionAnalysis?.DetectedStars,
-                CameraTemp   = meta.Camera?.Temperature,
+                CameraTemp   = Finite(meta.Camera?.Temperature),
             };
 
             await _apiClient.IngestFramesAsync(
