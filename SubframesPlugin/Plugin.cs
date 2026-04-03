@@ -11,6 +11,12 @@ using Subframes.NinaPlugin.UI;
 
 namespace Subframes.NinaPlugin;
 
+// Shared helper: replace NaN/±Infinity with null for clean JSON.
+file static class DoubleExtensions
+{
+    internal static double? Finite(double? v) => v is double d && double.IsFinite(d) ? v : null;
+}
+
 /// <summary>
 /// Main plugin entry point.  NINA discovers this via MEF ([Export(typeof(IPluginManifest))]).
 /// Manifest properties (Name, Identifier, Author, etc.) are read from assembly attributes
@@ -121,10 +127,10 @@ public class SubframesPlugin : PluginBase, IPluginManifest
             equipment = new StationEquipmentDto
             {
                 TelescopeName = ts?.Name,
-                FocalLength   = ts?.FocalLength,
-                Aperture      = apertureDiameter,
+                FocalLength   = DoubleExtensions.Finite(ts?.FocalLength),
+                Aperture      = DoubleExtensions.Finite(apertureDiameter),
                 CameraName    = cs?.Id,
-                PixelSize     = cs?.PixelSize,
+                PixelSize     = DoubleExtensions.Finite(cs?.PixelSize),
                 MountName     = ts?.Name,
                 FilterWheel   = fw?.Id,
                 Filters       = filters is { Count: > 0 } ? filters : null,
@@ -140,10 +146,10 @@ public class SubframesPlugin : PluginBase, IPluginManifest
             var ast = profile?.AstrometrySettings;
             location = new StationLocationDto
             {
-                Latitude        = ast?.Latitude,
-                Longitude       = ast?.Longitude,
+                Latitude        = DoubleExtensions.Finite(ast?.Latitude),
+                Longitude       = DoubleExtensions.Finite(ast?.Longitude),
                 Label           = profile?.Name,
-                ElevationMeters = ast?.Elevation,
+                ElevationMeters = DoubleExtensions.Finite(ast?.Elevation),
             };
         }
         catch (Exception ex)
