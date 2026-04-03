@@ -36,6 +36,9 @@ public partial class OptionsPanelViewModel : ObservableObject
     private bool _isEnabled;
 
     [ObservableProperty]
+    private bool _isDebugEnabled;
+
+    [ObservableProperty]
     private string _instanceId = string.Empty;
 
     [ObservableProperty]
@@ -64,6 +67,7 @@ public partial class OptionsPanelViewModel : ObservableObject
         ApiBaseUrl = _options.ApiBaseUrl;
         ApiKey = _options.ApiKey;
         IsEnabled = _options.IsEnabled;
+        IsDebugEnabled = _options.IsDebugEnabled;
         InstanceId = _options.InstanceId;
         InstanceName = _options.InstanceName;
 
@@ -78,11 +82,12 @@ public partial class OptionsPanelViewModel : ObservableObject
         _options.ApiBaseUrl = ApiBaseUrl.Trim();
         _options.ApiKey = ApiKey.Trim();
         _options.IsEnabled = IsEnabled;
+        _options.IsDebugEnabled = IsDebugEnabled;
         _options.InstanceName = InstanceName.Trim();
         _options.Save();
         _plugin.ApplyOptionsChange();
         StatusMessage = "Settings saved.";
-        Logger.Info($"[Subframes] Settings saved — API URL: {_options.ApiBaseUrl}  Enabled: {_options.IsEnabled}");
+        Logger.Info($"[Subframes] Settings saved — API URL: {_options.ApiBaseUrl}  Enabled: {_options.IsEnabled}  Debug: {_options.IsDebugEnabled}");
     }
 
     [RelayCommand]

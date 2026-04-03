@@ -61,6 +61,8 @@ public sealed class SubframesClient : IDisposable
         {
             SetAuthHeader();
             var url = $"{BaseUrl}/api/v1/ingest/session/start";
+            if (_options.IsDebugEnabled)
+                Logger.Debug($"[Subframes] POST {url} body={JsonSerializer.Serialize(request, JsonOptions)}");
             using var response = await _http.PostAsJsonAsync(url, request, JsonOptions, ct);
             response.EnsureSuccessStatusCode();
 
@@ -101,6 +103,8 @@ public sealed class SubframesClient : IDisposable
                 SessionId = sessionId,
                 EndTime = DateTime.UtcNow.ToString("o")
             };
+            if (_options.IsDebugEnabled)
+                Logger.Debug($"[Subframes] POST {url} body={JsonSerializer.Serialize(body, JsonOptions)}");
             using var response = await _http.PostAsJsonAsync(url, body, JsonOptions, ct);
             response.EnsureSuccessStatusCode();
             Logger.Info($"[Subframes] Session ended: {sessionId}");
@@ -131,6 +135,8 @@ public sealed class SubframesClient : IDisposable
         {
             SetAuthHeader();
             var url = $"{BaseUrl}/api/v1/ingest/heartbeat";
+            if (_options.IsDebugEnabled)
+                Logger.Debug($"[Subframes] POST {url} body={JsonSerializer.Serialize(request, JsonOptions)}");
             using var response = await _http.PostAsJsonAsync(url, request, JsonOptions, cts.Token);
             response.EnsureSuccessStatusCode();
             Logger.Debug($"[Subframes] Heartbeat sent for session {request.SessionId}");
@@ -164,6 +170,8 @@ public sealed class SubframesClient : IDisposable
         {
             SetAuthHeader();
             var url = $"{BaseUrl}/api/v1/ingest/station/heartbeat";
+            if (_options.IsDebugEnabled)
+                Logger.Debug($"[Subframes] POST {url} body={JsonSerializer.Serialize(request, JsonOptions)}");
             using var response = await _http.PostAsJsonAsync(url, request, JsonOptions, cts.Token);
             response.EnsureSuccessStatusCode();
             Logger.Debug($"[Subframes] Station heartbeat sent (status={request.Status})");
@@ -200,6 +208,8 @@ public sealed class SubframesClient : IDisposable
                 SessionId = sessionId,
                 Frames = frames
             };
+            if (_options.IsDebugEnabled)
+                Logger.Debug($"[Subframes] POST {url} body={JsonSerializer.Serialize(body, JsonOptions)}");
             using var response = await _http.PostAsJsonAsync(url, body, JsonOptions, ct);
             response.EnsureSuccessStatusCode();
 
