@@ -112,7 +112,7 @@
         <StackPanel Orientation="Horizontal">
             <TextBlock
                 Text="{Binding StatusMessage}"
-                Foreground="{DynamicResource SecondaryBrush}"
+                Foreground="{DynamicResource PrimaryBrush}"
                 VerticalAlignment="Center"
                 Margin="0,0,8,0" />
             <Button
