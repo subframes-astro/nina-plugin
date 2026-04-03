@@ -123,7 +123,7 @@ public class SubframesPlugin : PluginBase, IPluginManifest
                 TelescopeName = ts?.Name,
                 FocalLength   = ts?.FocalLength,
                 Aperture      = apertureDiameter,
-                CameraName    = cs?.LastDeviceName ?? cs?.Id,
+                CameraName    = cs?.Id,
                 PixelSize     = cs?.PixelSize,
                 MountName     = ts?.Name,
                 FilterWheel   = fw?.Id,
