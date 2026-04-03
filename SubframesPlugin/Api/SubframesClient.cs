@@ -188,7 +188,7 @@ public sealed class SubframesClient : IDisposable
     // ── Health Check ───────────────────────────────────────────────────────
 
     /// <summary>
-    /// Check API connectivity by hitting GET /api/health.
+    /// Check API connectivity by hitting GET /healthz.
     /// Uses the provided URL and API key so the user can test before saving.
     /// Returns (true, null) on success, or (false, detail) with a diagnostic message on failure.
     /// </summary>
@@ -204,7 +204,7 @@ public sealed class SubframesClient : IDisposable
 
         try
         {
-            var url = $"{baseUrl.TrimEnd('/')}/api/health";
+            var url = $"{baseUrl.TrimEnd('/')}/healthz";
             using var response = await http.GetAsync(url, ct);
             if (response.IsSuccessStatusCode)
                 return (true, null);
