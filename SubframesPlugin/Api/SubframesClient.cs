@@ -287,7 +287,8 @@ public sealed class SubframesClient : IDisposable
             if (response.StatusCode == System.Net.HttpStatusCode.Unauthorized)
                 return (false, "Invalid API key");
 
-            if (response.StatusCode == System.Net.HttpStatusCode.NotFound)
+            if (response.StatusCode == System.Net.HttpStatusCode.NotFound
+                || response.StatusCode == System.Net.HttpStatusCode.MethodNotAllowed)
                 return (true, "Endpoint not available");
 
             return (false, $"HTTP {(int)response.StatusCode} {response.ReasonPhrase}");
