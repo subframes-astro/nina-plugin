@@ -47,7 +47,7 @@ public partial class OptionsPanelViewModel : ObservableObject
     private string _apiStatusText = string.Empty;
 
     [ObservableProperty]
-    private SolidColorBrush _apiStatusBrush = new(Colors.Gray);
+    private SolidColorBrush _apiStatusBrush = FrozenBrush(Colors.Gray);
 
     [ObservableProperty]
     private bool _isCheckingApi;
@@ -90,36 +90,36 @@ public partial class OptionsPanelViewModel : ObservableObject
         if (string.IsNullOrWhiteSpace(ApiBaseUrl))
         {
             ApiStatusText = "No URL configured";
-            ApiStatusBrush = new SolidColorBrush(Colors.Gray);
+            ApiStatusBrush = FrozenBrush(Colors.Gray);
             return;
         }
 
         IsCheckingApi = true;
         ApiStatusText = "Checking...";
-        ApiStatusBrush = new SolidColorBrush(Colors.Gray);
+        ApiStatusBrush = FrozenBrush(Colors.Gray);
 
         try
         {
-            var connected = await SubframesClient.CheckHealthAsync(
+            var (connected, detail) = await SubframesClient.CheckHealthAsync(
                 ApiBaseUrl.Trim(), ApiKey?.Trim() ?? string.Empty);
 
             if (connected)
             {
                 ApiStatusText = "Connected";
-                ApiStatusBrush = new SolidColorBrush(Color.FromRgb(0x22, 0xC5, 0x5E)); // green
+                ApiStatusBrush = FrozenBrush(Color.FromRgb(0x22, 0xC5, 0x5E)); // green
                 Logger.Info($"[Subframes] API health check passed: {ApiBaseUrl.Trim()}");
             }
             else
             {
                 ApiStatusText = "Disconnected";
-                ApiStatusBrush = new SolidColorBrush(Color.FromRgb(0xEF, 0x44, 0x44)); // red
-                Logger.Warning($"[Subframes] API health check failed: {ApiBaseUrl.Trim()}");
+                ApiStatusBrush = FrozenBrush(Color.FromRgb(0xEF, 0x44, 0x44)); // red
+                Logger.Warning($"[Subframes] API health check failed: {ApiBaseUrl.Trim()} — {detail}");
             }
         }
         catch (Exception ex)
         {
             ApiStatusText = "Error";
-            ApiStatusBrush = new SolidColorBrush(Color.FromRgb(0xEF, 0x44, 0x44)); // red
+            ApiStatusBrush = FrozenBrush(Color.FromRgb(0xEF, 0x44, 0x44)); // red
             Logger.Error($"[Subframes] API health check error: {ex.Message}");
         }
         finally
@@ -136,5 +136,12 @@ public partial class OptionsPanelViewModel : ObservableObject
         StatusMessage = id is not null
             ? $"Active session: {id}"
             : "No active session.";
+    }
+
+    private static SolidColorBrush FrozenBrush(Color color)
+    {
+        var brush = new SolidColorBrush(color);
+        brush.Freeze();
+        return brush;
     }
 }

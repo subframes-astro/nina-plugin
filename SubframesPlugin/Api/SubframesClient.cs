@@ -190,9 +190,9 @@ public sealed class SubframesClient : IDisposable
     /// <summary>
     /// Check API connectivity by hitting GET /health.
     /// Uses the provided URL and API key so the user can test before saving.
-    /// Returns true if the server responds with 2xx.
+    /// Returns (true, null) on success, or (false, detail) with a diagnostic message on failure.
     /// </summary>
-    public static async Task<bool> CheckHealthAsync(
+    public static async Task<(bool Connected, string? Detail)> CheckHealthAsync(
         string baseUrl,
         string apiKey,
         CancellationToken ct = default)
@@ -206,11 +206,22 @@ public sealed class SubframesClient : IDisposable
         {
             var url = $"{baseUrl.TrimEnd('/')}/health";
             using var response = await http.GetAsync(url, ct);
-            return response.IsSuccessStatusCode;
+            if (response.IsSuccessStatusCode)
+                return (true, null);
+
+            return (false, $"HTTP {(int)response.StatusCode} {response.ReasonPhrase}");
         }
-        catch
+        catch (TaskCanceledException)
         {
-            return false;
+            return (false, "Request timed out after 5 s");
+        }
+        catch (HttpRequestException ex)
+        {
+            return (false, ex.Message);
+        }
+        catch (Exception ex)
+        {
+            return (false, ex.Message);
         }
     }
 
