@@ -2,6 +2,7 @@ using System.ComponentModel.Composition;
 using System.Reflection;
 using System.Threading.Tasks;
 using NINA.Core.Utility;
+using NINA.Equipment.Interfaces.Mediator;
 using NINA.Profile.Interfaces;
 using NINA.WPF.Base.Interfaces.Mediator;
 using NINA.Plugin;
@@ -31,16 +32,39 @@ public class SubframesPlugin : PluginBase, IPluginManifest
     private readonly SubframesClient _apiClient;
     private readonly PluginOptions _options;
     private readonly IProfileService _profileService;
+    private readonly ICameraMediator _cameraMediator;
+    private readonly ITelescopeMediator _telescopeMediator;
+    private readonly IFocuserMediator _focuserMediator;
+    private readonly IFilterWheelMediator _filterWheelMediator;
+    private readonly IRotatorMediator _rotatorMediator;
+    private readonly IGuiderMediator _guiderMediator;
+    private readonly IFlatDeviceMediator _flatDeviceMediator;
 
     private CancellationTokenSource? _stationHeartbeatCts;
     private Task? _stationHeartbeatTask;
 
     [ImportingConstructor]
-    public SubframesPlugin(IImageSaveMediator imageSaveMediator, IProfileService profileService)
+    public SubframesPlugin(
+        IImageSaveMediator imageSaveMediator,
+        IProfileService profileService,
+        ICameraMediator cameraMediator,
+        ITelescopeMediator telescopeMediator,
+        IFocuserMediator focuserMediator,
+        IFilterWheelMediator filterWheelMediator,
+        IRotatorMediator rotatorMediator,
+        IGuiderMediator guiderMediator,
+        IFlatDeviceMediator flatDeviceMediator)
     {
         _options = PluginOptions.Load();
         _apiClient = new SubframesClient(_options);
         _profileService = profileService;
+        _cameraMediator = cameraMediator;
+        _telescopeMediator = telescopeMediator;
+        _focuserMediator = focuserMediator;
+        _filterWheelMediator = filterWheelMediator;
+        _rotatorMediator = rotatorMediator;
+        _guiderMediator = guiderMediator;
+        _flatDeviceMediator = flatDeviceMediator;
         _sessionService = new SessionService(imageSaveMediator, _apiClient, _options);
         _optionsVm = new OptionsPanelViewModel(this);
 
@@ -123,6 +147,10 @@ public class SubframesPlugin : PluginBase, IPluginManifest
     {
         var profile = _profileService.ActiveProfile;
 
+        List<DeviceDto>? devices = null;
+        try { devices = BuildDevices(); }
+        catch (Exception ex) { Logger.Warning($"[Subframes] Station heartbeat: could not collect device statuses: {ex.Message}"); }
+
         StationEquipmentDto? equipment = null;
         StationLocationDto? location = null;
 
@@ -152,6 +180,7 @@ public class SubframesPlugin : PluginBase, IPluginManifest
                 MountName     = ts?.Name,
                 FilterWheel   = fw?.Id,
                 Filters       = filters is { Count: > 0 } ? filters : null,
+                Devices       = devices,
             };
         }
         catch (Exception ex)
@@ -186,5 +215,23 @@ public class SubframesPlugin : PluginBase, IPluginManifest
             Equipment     = equipment,
             Location      = location,
         };
+    }
+
+    private List<DeviceDto> BuildDevices()
+    {
+        var devices = new List<DeviceDto>(8);
+
+        DeviceDto Slot(string category, string? name, bool connected, string? driverVersion = null) =>
+            new() { Category = category, Name = string.IsNullOrEmpty(name) ? null : name, Connected = connected, DriverVersion = driverVersion };
+
+        try { var i = _cameraMediator.GetInfo();      devices.Add(Slot("Camera",      i.Name, i.Connected)); } catch { /* device not available */ }
+        try { var i = _telescopeMediator.GetInfo();   devices.Add(Slot("Mount",        i.Name, i.Connected)); } catch { /* device not available */ }
+        try { var i = _focuserMediator.GetInfo();     devices.Add(Slot("Focuser",     i.Name, i.Connected)); } catch { /* device not available */ }
+        try { var i = _filterWheelMediator.GetInfo(); devices.Add(Slot("FilterWheel", i.Name, i.Connected)); } catch { /* device not available */ }
+        try { var i = _rotatorMediator.GetInfo();     devices.Add(Slot("Rotator",     i.Name, i.Connected)); } catch { /* device not available */ }
+        try { var i = _guiderMediator.GetInfo();      devices.Add(Slot("Guider",      i.Name, i.Connected)); } catch { /* device not available */ }
+        try { var i = _flatDeviceMediator.GetInfo();  devices.Add(Slot("FlatPanel",   i.Name, i.Connected)); } catch { /* device not available */ }
+
+        return devices;
     }
 }

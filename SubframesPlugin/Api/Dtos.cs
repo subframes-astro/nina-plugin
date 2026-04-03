@@ -289,6 +289,28 @@ public sealed class StationEquipmentDto
 
     [JsonPropertyName("accessories")]
     public List<string> Accessories { get; init; } = [];
+
+    [JsonPropertyName("devices")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public List<DeviceDto>? Devices { get; init; }
+}
+
+/// <summary>Per-device connection status entry within StationEquipmentDto.Devices.</summary>
+public sealed class DeviceDto
+{
+    [JsonPropertyName("category")]
+    public required string Category { get; init; }
+
+    [JsonPropertyName("name")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Name { get; init; }
+
+    [JsonPropertyName("connected")]
+    public bool Connected { get; init; }
+
+    [JsonPropertyName("driverVersion")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? DriverVersion { get; init; }
 }
 
 /// <summary>Location info nested in StationHeartbeatRequest.</summary>
