@@ -108,9 +108,9 @@ public class SubframesPlugin : PluginBase, IPluginManifest
             var cs = profile?.CameraSettings;
             var fw = profile?.FilterWheelSettings;
 
-            // ApertureArea in NINA is stored in mm²; derive diameter = 2*sqrt(area/π).
-            double? apertureDiameter = ts?.ApertureArea is double area and > 0
-                ? 2.0 * Math.Sqrt(area / Math.PI)
+            // Derive aperture diameter (mm) from FocalLength / FocalRatio (f-number).
+            double? apertureDiameter = (ts?.FocalLength is double fl and > 0 && ts?.FocalRatio is double fr and > 0)
+                ? fl / fr
                 : null;
 
             var filters = fw?.FilterWheelFilters
@@ -123,7 +123,7 @@ public class SubframesPlugin : PluginBase, IPluginManifest
                 TelescopeName = ts?.Name,
                 FocalLength   = ts?.FocalLength,
                 Aperture      = apertureDiameter,
-                CameraName    = cs?.Name,
+                CameraName    = cs?.LastDeviceName ?? cs?.Id,
                 PixelSize     = cs?.PixelSize,
                 MountName     = ts?.Name,
                 FilterWheel   = fw?.Id,
