@@ -75,7 +75,7 @@ public sealed class SessionService : IDisposable
         {
             Logger.Info($"[Subframes] Session started: {sessionId} target='{request.TargetName}'");
             if (_options.IsDebugEnabled)
-                Logger.Debug($"[Subframes] Session start confirmed: sessionId={sessionId} target='{request.TargetName}'");
+                Logger.Info($"[Subframes] Session start confirmed: sessionId={sessionId} target='{request.TargetName}'");
             _currentTarget = request.TargetName;
             _snapshot = new HeartbeatSnapshot(null, null, null);
             _sessionStartTime = DateTime.UtcNow;
@@ -96,7 +96,7 @@ public sealed class SessionService : IDisposable
         if (sessionId is null) return;
 
         if (_options.IsDebugEnabled)
-            Logger.Debug($"[Subframes] Ending session: sessionId={sessionId} frameCount={_frameCounter}");
+            Logger.Info($"[Subframes] Ending session: sessionId={sessionId} frameCount={_frameCounter}");
         StopHeartbeatTimer();
         _activeSessionId = null;
         await _apiClient.EndSessionAsync(sessionId, ct);
@@ -156,7 +156,7 @@ public sealed class SessionService : IDisposable
             };
 
             if (_options.IsDebugEnabled)
-                Logger.Debug($"[Subframes] Frame queued: sessionId={sessionId} frameNumber={frameNumber} filter={filter ?? "none"} hfr={hfr?.ToString("F2") ?? "n/a"}");
+                Logger.Info($"[Subframes] Frame queued: sessionId={sessionId} frameNumber={frameNumber} filter={filter ?? "none"} hfr={hfr?.ToString("F2") ?? "n/a"}");
             await _apiClient.IngestFramesAsync(
                 sessionId,
                 new List<FrameInput> { frame });
@@ -207,7 +207,7 @@ public sealed class SessionService : IDisposable
                     InstanceName   = string.IsNullOrWhiteSpace(_options.InstanceName) ? null : _options.InstanceName,
                 };
                 if (_options.IsDebugEnabled)
-                    Logger.Debug($"[Subframes] Heartbeat firing: sessionId={sessionId} frameCount={payload.ExposureCount} uptimeMin={payload.UptimeMinutes}");
+                    Logger.Info($"[Subframes] Heartbeat firing: sessionId={sessionId} frameCount={payload.ExposureCount} uptimeMin={payload.UptimeMinutes}");
                 // Fire-and-forget — never block the timer loop on a slow network.
                 _ = _apiClient.SendHeartbeatAsync(payload, CancellationToken.None);
             }

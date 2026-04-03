@@ -41,8 +41,21 @@ public sealed class SubframesClient : IDisposable
     private void SetAuthHeader()
     {
         if (!string.IsNullOrWhiteSpace(_options.ApiKey))
+        {
             _http.DefaultRequestHeaders.Authorization =
                 new AuthenticationHeaderValue("Bearer", _options.ApiKey);
+            if (_options.IsDebugEnabled)
+            {
+                var preview = _options.ApiKey.Length > 12
+                    ? _options.ApiKey[..12] + "..."
+                    : "(short key)";
+                Logger.Info($"[Subframes] Auth header set: Bearer {preview}");
+            }
+        }
+        else if (_options.IsDebugEnabled)
+        {
+            Logger.Info("[Subframes] No API key configured — request will be unauthenticated");
+        }
     }
 
     // ── Session Start ────────────────────────────────────────────────────────
@@ -62,7 +75,7 @@ public sealed class SubframesClient : IDisposable
             SetAuthHeader();
             var url = $"{BaseUrl}/api/v1/ingest/session/start";
             if (_options.IsDebugEnabled)
-                Logger.Debug($"[Subframes] POST {url} body={JsonSerializer.Serialize(request, JsonOptions)}");
+                Logger.Info($"[Subframes] POST {url} body={JsonSerializer.Serialize(request, JsonOptions)}");
             using var response = await _http.PostAsJsonAsync(url, request, JsonOptions, ct);
             response.EnsureSuccessStatusCode();
 
@@ -104,7 +117,7 @@ public sealed class SubframesClient : IDisposable
                 EndTime = DateTime.UtcNow.ToString("o")
             };
             if (_options.IsDebugEnabled)
-                Logger.Debug($"[Subframes] POST {url} body={JsonSerializer.Serialize(body, JsonOptions)}");
+                Logger.Info($"[Subframes] POST {url} body={JsonSerializer.Serialize(body, JsonOptions)}");
             using var response = await _http.PostAsJsonAsync(url, body, JsonOptions, ct);
             response.EnsureSuccessStatusCode();
             Logger.Info($"[Subframes] Session ended: {sessionId}");
@@ -136,7 +149,7 @@ public sealed class SubframesClient : IDisposable
             SetAuthHeader();
             var url = $"{BaseUrl}/api/v1/ingest/heartbeat";
             if (_options.IsDebugEnabled)
-                Logger.Debug($"[Subframes] POST {url} body={JsonSerializer.Serialize(request, JsonOptions)}");
+                Logger.Info($"[Subframes] POST {url} body={JsonSerializer.Serialize(request, JsonOptions)}");
             using var response = await _http.PostAsJsonAsync(url, request, JsonOptions, cts.Token);
             response.EnsureSuccessStatusCode();
             Logger.Debug($"[Subframes] Heartbeat sent for session {request.SessionId}");
@@ -171,7 +184,7 @@ public sealed class SubframesClient : IDisposable
             SetAuthHeader();
             var url = $"{BaseUrl}/api/v1/ingest/station/heartbeat";
             if (_options.IsDebugEnabled)
-                Logger.Debug($"[Subframes] POST {url} body={JsonSerializer.Serialize(request, JsonOptions)}");
+                Logger.Info($"[Subframes] POST {url} body={JsonSerializer.Serialize(request, JsonOptions)}");
             using var response = await _http.PostAsJsonAsync(url, request, JsonOptions, cts.Token);
             response.EnsureSuccessStatusCode();
             Logger.Debug($"[Subframes] Station heartbeat sent (status={request.Status})");
@@ -209,7 +222,7 @@ public sealed class SubframesClient : IDisposable
                 Frames = frames
             };
             if (_options.IsDebugEnabled)
-                Logger.Debug($"[Subframes] POST {url} body={JsonSerializer.Serialize(body, JsonOptions)}");
+                Logger.Info($"[Subframes] POST {url} body={JsonSerializer.Serialize(body, JsonOptions)}");
             using var response = await _http.PostAsJsonAsync(url, body, JsonOptions, ct);
             response.EnsureSuccessStatusCode();
 

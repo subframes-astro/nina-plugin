@@ -145,7 +145,8 @@ public partial class OptionsPanelViewModel : ObservableObject
             {
                 ApiStatusText = "Invalid API Key";
                 ApiStatusBrush = FrozenBrush(Color.FromRgb(0xF5, 0x9E, 0x0B)); // amber
-                Logger.Warning($"[Subframes] API key invalid: {trimmedUrl}");
+                var keyPreview = trimmedKey.Length > 12 ? trimmedKey[..12] + "..." : "(short key)";
+                Logger.Warning($"[Subframes] API key invalid: {trimmedUrl} (key starts with '{keyPreview}')");
             }
             else
             {
