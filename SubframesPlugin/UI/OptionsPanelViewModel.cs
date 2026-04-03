@@ -125,10 +125,12 @@ public partial class OptionsPanelViewModel : ObservableObject
 
             if (valid)
             {
-                var suffix = keyDetail == "Endpoint not available" ? " (key not verified)" : "";
-                ApiStatusText = $"Connected{suffix}";
+                ApiStatusText = "Connected";
                 ApiStatusBrush = FrozenBrush(Color.FromRgb(0x22, 0xC5, 0x5E)); // green
-                Logger.Info($"[Subframes] API key validated: {trimmedUrl}{(suffix.Length > 0 ? " — validation endpoint not deployed" : "")}");
+                if (keyDetail == "Endpoint not available")
+                    Logger.Info($"[Subframes] Connected: {trimmedUrl} — key validation endpoint not deployed, key will be verified on first API call");
+                else
+                    Logger.Info($"[Subframes] Connected (key verified): {trimmedUrl}");
             }
             else if (keyDetail == "Invalid API key")
             {
