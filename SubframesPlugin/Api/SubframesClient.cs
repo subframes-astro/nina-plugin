@@ -225,5 +225,48 @@ public sealed class SubframesClient : IDisposable
         }
     }
 
+    // ── API Key Validation ─────────────────────────────────────────────────
+
+    /// <summary>
+    /// Validate an API key against the backend.
+    /// Uses a dedicated 5-second timeout. Returns (true, null) on 200 OK,
+    /// (false, "Invalid API key") on 401, or (false, detail) on other failures.
+    /// </summary>
+    public static async Task<(bool Valid, string? Detail)> ValidateApiKeyAsync(
+        string baseUrl,
+        string apiKey,
+        CancellationToken ct = default)
+    {
+        using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(5) };
+        http.DefaultRequestHeaders.Authorization =
+            new AuthenticationHeaderValue("Bearer", apiKey);
+
+        try
+        {
+            var url = $"{baseUrl.TrimEnd('/')}/api/v1/auth/validate-key";
+            using var response = await http.GetAsync(url, ct);
+
+            if (response.IsSuccessStatusCode)
+                return (true, null);
+
+            if (response.StatusCode == System.Net.HttpStatusCode.Unauthorized)
+                return (false, "Invalid API key");
+
+            return (false, $"HTTP {(int)response.StatusCode} {response.ReasonPhrase}");
+        }
+        catch (TaskCanceledException)
+        {
+            return (false, "Request timed out after 5 s");
+        }
+        catch (HttpRequestException ex)
+        {
+            return (false, ex.Message);
+        }
+        catch (Exception ex)
+        {
+            return (false, ex.Message);
+        }
+    }
+
     public void Dispose() => _http.Dispose();
 }

@@ -100,27 +100,53 @@ public partial class OptionsPanelViewModel : ObservableObject
 
         try
         {
-            var (connected, detail) = await SubframesClient.CheckHealthAsync(
-                ApiBaseUrl.Trim(), ApiKey?.Trim() ?? string.Empty);
+            var trimmedUrl = ApiBaseUrl.Trim();
+            var trimmedKey = ApiKey?.Trim() ?? string.Empty;
 
-            if (connected)
-            {
-                ApiStatusText = "Connected";
-                ApiStatusBrush = FrozenBrush(Color.FromRgb(0x22, 0xC5, 0x5E)); // green
-                Logger.Info($"[Subframes] API health check passed: {ApiBaseUrl.Trim()}");
-            }
-            else
+            var (connected, healthDetail) = await SubframesClient.CheckHealthAsync(trimmedUrl, trimmedKey);
+
+            if (!connected)
             {
                 ApiStatusText = "Disconnected";
                 ApiStatusBrush = FrozenBrush(Color.FromRgb(0xEF, 0x44, 0x44)); // red
-                Logger.Warning($"[Subframes] API health check failed: {ApiBaseUrl.Trim()} — {detail}");
+                Logger.Warning($"[Subframes] API health check failed: {trimmedUrl} — {healthDetail}");
+                return;
+            }
+
+            if (string.IsNullOrWhiteSpace(trimmedKey))
+            {
+                ApiStatusText = "Connected (no API key)";
+                ApiStatusBrush = FrozenBrush(Color.FromRgb(0x22, 0xC5, 0x5E)); // green
+                Logger.Info($"[Subframes] API health check passed (no API key): {trimmedUrl}");
+                return;
+            }
+
+            var (valid, keyDetail) = await SubframesClient.ValidateApiKeyAsync(trimmedUrl, trimmedKey);
+
+            if (valid)
+            {
+                ApiStatusText = "Connected";
+                ApiStatusBrush = FrozenBrush(Color.FromRgb(0x22, 0xC5, 0x5E)); // green
+                Logger.Info($"[Subframes] API key validated: {trimmedUrl}");
+            }
+            else if (keyDetail == "Invalid API key")
+            {
+                ApiStatusText = "Invalid API Key";
+                ApiStatusBrush = FrozenBrush(Color.FromRgb(0xF5, 0x9E, 0x0B)); // amber
+                Logger.Warning($"[Subframes] API key invalid: {trimmedUrl}");
+            }
+            else
+            {
+                ApiStatusText = "Key validation failed";
+                ApiStatusBrush = FrozenBrush(Color.FromRgb(0xEF, 0x44, 0x44)); // red
+                Logger.Error($"[Subframes] API key validation error: {trimmedUrl} — {keyDetail}");
             }
         }
         catch (Exception ex)
         {
             ApiStatusText = "Error";
             ApiStatusBrush = FrozenBrush(Color.FromRgb(0xEF, 0x44, 0x44)); // red
-            Logger.Error($"[Subframes] API health check error: {ex.Message}");
+            Logger.Error($"[Subframes] API connection check error: {ex.Message}");
         }
         finally
         {
