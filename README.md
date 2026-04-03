@@ -20,7 +20,7 @@ Prebuilt plugin binaries are available on the [Releases](https://github.com/subf
 
 - NINA 3.x (tested on 3.1+)
 - .NET 8 runtime (bundled with NINA 3.x)
-- A Subframes account at [subframes.app](https://subframes.app)
+- A Subframes account at [subframes.io](https://subframes.io)
 - A valid API key (generate one from your Subframes account settings)
 
 ## Building from source
