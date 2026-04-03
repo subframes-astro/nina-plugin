@@ -53,6 +53,9 @@ public sealed class SessionService : IDisposable
     /// <summary>The server-assigned session ID, or null if no session is active.</summary>
     public string? ActiveSessionId => _activeSessionId;
 
+    /// <summary>True when an imaging session is currently active.</summary>
+    public bool HasActiveSession => _activeSessionId is not null;
+
     /// <summary>
     /// Call this from the StartSessionItem sequence item.
     /// POSTs to /api/v1/ingest/session/start and stores the returned ID.

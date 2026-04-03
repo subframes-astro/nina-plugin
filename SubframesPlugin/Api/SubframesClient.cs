@@ -143,6 +143,39 @@ public sealed class SubframesClient : IDisposable
         }
     }
 
+    // ── Station Heartbeat ────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Fire-and-forget station-level heartbeat. Independent of any imaging session.
+    /// Uses a dedicated 5-second timeout so a slow server never blocks the caller.
+    /// </summary>
+    public async Task SendStationHeartbeatAsync(
+        StationHeartbeatRequest request,
+        CancellationToken ct = default)
+    {
+        if (!_options.IsEnabled) return;
+
+        using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        cts.CancelAfter(TimeSpan.FromSeconds(5));
+
+        try
+        {
+            SetAuthHeader();
+            var url = $"{BaseUrl}/api/v1/ingest/station/heartbeat";
+            using var response = await _http.PostAsJsonAsync(url, request, JsonOptions, cts.Token);
+            response.EnsureSuccessStatusCode();
+            Logger.Debug($"[Subframes] Station heartbeat sent (status={request.Status})");
+        }
+        catch (OperationCanceledException)
+        {
+            Logger.Warning("[Subframes] Station heartbeat timed out");
+        }
+        catch (Exception ex)
+        {
+            Logger.Warning($"[Subframes] Station heartbeat failed: {ex.Message}");
+        }
+    }
+
     // ── Frame Ingest ─────────────────────────────────────────────────────────
 
     /// <summary>

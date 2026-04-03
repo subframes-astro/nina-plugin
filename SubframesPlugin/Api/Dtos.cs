@@ -217,6 +217,100 @@ public sealed class FrameInput
     public double? SkyQuality { get; init; }
 }
 
+/// <summary>Body for POST /api/v1/ingest/station/heartbeat</summary>
+public sealed class StationHeartbeatRequest
+{
+    [JsonPropertyName("instanceId")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? InstanceId { get; init; }
+
+    [JsonPropertyName("instanceName")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? InstanceName { get; init; }
+
+    [JsonPropertyName("status")]
+    public required string Status { get; init; }
+
+    [JsonPropertyName("pluginVersion")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? PluginVersion { get; init; }
+
+    [JsonPropertyName("equipment")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public StationEquipmentDto? Equipment { get; init; }
+
+    [JsonPropertyName("location")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public StationLocationDto? Location { get; init; }
+}
+
+/// <summary>Equipment info nested in StationHeartbeatRequest.</summary>
+public sealed class StationEquipmentDto
+{
+    [JsonPropertyName("telescopeName")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? TelescopeName { get; init; }
+
+    [JsonPropertyName("focalLength")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public double? FocalLength { get; init; }
+
+    [JsonPropertyName("aperture")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public double? Aperture { get; init; }
+
+    [JsonPropertyName("cameraName")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? CameraName { get; init; }
+
+    [JsonPropertyName("pixelSize")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public double? PixelSize { get; init; }
+
+    [JsonPropertyName("sensorWidth")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public int? SensorWidth { get; init; }
+
+    [JsonPropertyName("sensorHeight")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public int? SensorHeight { get; init; }
+
+    [JsonPropertyName("mountName")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? MountName { get; init; }
+
+    [JsonPropertyName("filterWheel")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? FilterWheel { get; init; }
+
+    [JsonPropertyName("filters")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public List<string>? Filters { get; init; }
+
+    [JsonPropertyName("accessories")]
+    public List<string> Accessories { get; init; } = [];
+}
+
+/// <summary>Location info nested in StationHeartbeatRequest.</summary>
+public sealed class StationLocationDto
+{
+    [JsonPropertyName("latitude")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public double? Latitude { get; init; }
+
+    [JsonPropertyName("longitude")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public double? Longitude { get; init; }
+
+    [JsonPropertyName("label")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Label { get; init; }
+
+    [JsonPropertyName("elevationMeters")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public double? ElevationMeters { get; init; }
+}
+
 // ── Responses ────────────────────────────────────────────────────────────────
 
 /// <summary>Standard API envelope: { "data": T, "error": { "code", "message" } }</summary>
