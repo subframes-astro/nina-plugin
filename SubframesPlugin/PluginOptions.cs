@@ -39,6 +39,14 @@ public class PluginOptions
     /// <summary>Friendly name for this NINA instance (e.g. "Main Scope", "Widefield Rig").</summary>
     public string InstanceName { get; set; } = string.Empty;
 
+    // ── Offline Cache ────────────────────────────────────────────────────────
+
+    /// <summary>Background sync interval in seconds (default 30).</summary>
+    public int CacheSyncIntervalSeconds { get; set; } = 30;
+
+    /// <summary>Hours to retain synced frames before pruning (default 72 = 3 days).</summary>
+    public int CacheRetentionHours { get; set; } = 72;
+
     // ── Persistence ──────────────────────────────────────────────────────────
 
     /// <summary>Load settings from disk, or return defaults if not present.</summary>

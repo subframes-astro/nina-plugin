@@ -8,6 +8,7 @@ using NINA.WPF.Base.Interfaces.Mediator;
 using NINA.Plugin;
 using NINA.Plugin.Interfaces;
 using Subframes.NinaPlugin.Api;
+using Subframes.NinaPlugin.Data;
 using Subframes.NinaPlugin.UI;
 
 namespace Subframes.NinaPlugin;
@@ -39,6 +40,8 @@ public class SubframesPlugin : PluginBase, IPluginManifest
     private readonly IRotatorMediator _rotatorMediator;
     private readonly IGuiderMediator _guiderMediator;
     private readonly IFlatDeviceMediator _flatDeviceMediator;
+    private readonly FrameCache _frameCache;
+    private readonly SyncEngine _syncEngine;
 
     private CancellationTokenSource? _stationHeartbeatCts;
     private Task? _stationHeartbeatTask;
@@ -65,11 +68,20 @@ public class SubframesPlugin : PluginBase, IPluginManifest
         _rotatorMediator = rotatorMediator;
         _guiderMediator = guiderMediator;
         _flatDeviceMediator = flatDeviceMediator;
-        _sessionService = new SessionService(imageSaveMediator, _apiClient, _options);
+        _frameCache = new FrameCache();
+        _syncEngine = new SyncEngine(_frameCache, _apiClient, _options);
+        _sessionService = new SessionService(imageSaveMediator, _apiClient, _options, _frameCache, _syncEngine);
         _optionsVm = new OptionsPanelViewModel(this);
 
         if (_options.IsEnabled && !string.IsNullOrWhiteSpace(_options.ApiKey))
+        {
             StartStationHeartbeat();
+            _syncEngine.Start();
+        }
+
+        var pending = _frameCache.GetPendingCount();
+        if (pending > 0)
+            Logger.Info($"[Subframes] {pending} cached frames pending sync from previous session.");
 
         Logger.Info("[Subframes] Plugin loaded.");
     }
@@ -91,15 +103,23 @@ public class SubframesPlugin : PluginBase, IPluginManifest
     internal void ApplyOptionsChange()
     {
         if (_options.IsEnabled && !string.IsNullOrWhiteSpace(_options.ApiKey))
+        {
             StartStationHeartbeat();
+            _syncEngine.Start();
+        }
         else
+        {
             StopStationHeartbeat();
+            _syncEngine.Stop();
+        }
     }
 
     public override async Task Teardown()
     {
         StopStationHeartbeat();
+        _syncEngine.Dispose();
         _sessionService.Dispose();
+        _frameCache.Dispose();
         Logger.Info("[Subframes] Plugin unloaded.");
         await base.Teardown();
     }

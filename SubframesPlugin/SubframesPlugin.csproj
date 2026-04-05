@@ -70,6 +70,8 @@
     <PackageReference Include="System.ComponentModel.Composition" Version="8.*" />
     <!-- MVVM source generators for [ObservableProperty], [RelayCommand] etc. -->
     <PackageReference Include="CommunityToolkit.Mvvm" Version="8.*" />
+    <!-- SQLite for offline frame caching -->
+    <PackageReference Include="Microsoft.Data.Sqlite" Version="8.*" />
   </ItemGroup>
 
   <!-- Assembly attributes consumed by NINA's PluginBase to populate manifest metadata -->

@@ -2,6 +2,7 @@ using NINA.Core.Model;
 using NINA.Core.Utility;
 using NINA.WPF.Base.Interfaces.Mediator;
 using Subframes.NinaPlugin.Api;
+using Subframes.NinaPlugin.Data;
 
 namespace Subframes.NinaPlugin;
 
@@ -12,7 +13,7 @@ namespace Subframes.NinaPlugin;
 /// The StartSessionItem sequence item calls <see cref="StartSessionAsync"/> to
 /// open a new server-side session before the sequence begins capturing.
 /// From that point on every ImageSaved event fires <see cref="OnImageSaved"/>
-/// which asynchronously POSTs the frame to the ingest API.
+/// which writes frame data to the local SQLite cache for background sync.
 ///
 /// Thread safety: the active session ID is stored in a volatile field; the
 /// event handler fires on NINA's internal thread pool so we must not block.
@@ -22,6 +23,8 @@ public sealed class SessionService : IDisposable
     private readonly IImageSaveMediator _imageSaveMediator;
     private readonly SubframesClient _apiClient;
     private readonly PluginOptions _options;
+    private readonly FrameCache _frameCache;
+    private readonly SyncEngine _syncEngine;
 
     private volatile string? _activeSessionId;
     private int _frameCounter;
@@ -42,11 +45,15 @@ public sealed class SessionService : IDisposable
     public SessionService(
         IImageSaveMediator imageSaveMediator,
         SubframesClient apiClient,
-        PluginOptions options)
+        PluginOptions options,
+        FrameCache frameCache,
+        SyncEngine syncEngine)
     {
         _imageSaveMediator = imageSaveMediator;
         _apiClient = apiClient;
         _options = options;
+        _frameCache = frameCache;
+        _syncEngine = syncEngine;
 
         // Subscribe once; the handler fires for every saved image while NINA runs.
         _imageSaveMediator.ImageSaved += OnImageSaved;
@@ -97,6 +104,11 @@ public sealed class SessionService : IDisposable
 
         if (_options.IsDebugEnabled)
             Logger.Info($"[Subframes] Ending session: sessionId={sessionId} frameCount={_frameCounter}");
+
+        // Flush any remaining cached frames before ending the session.
+        try { await _syncEngine.FlushAsync(ct); }
+        catch (Exception ex) { Logger.Warning($"[Subframes] Pre-end flush failed: {ex.Message}"); }
+
         StopHeartbeatTimer();
         _activeSessionId = null;
         await _apiClient.EndSessionAsync(sessionId, ct);
@@ -122,7 +134,7 @@ public sealed class SessionService : IDisposable
         _ = PostFrameAsync(sessionId, e);
     }
 
-    private async Task PostFrameAsync(string sessionId, ImageSavedEventArgs e)
+    private Task PostFrameAsync(string sessionId, ImageSavedEventArgs e)
     {
         try
         {
@@ -155,16 +167,19 @@ public sealed class SessionService : IDisposable
                 CameraTemp   = Finite(meta.Camera?.Temperature),
             };
 
+            // Write to local SQLite cache — never blocks, never throws.
+            // The SyncEngine will pick this up and batch-upload in the background.
+            _frameCache.InsertFrame(sessionId, frame);
+
             if (_options.IsDebugEnabled)
-                Logger.Info($"[Subframes] Frame queued: sessionId={sessionId} frameNumber={frameNumber} filter={filter ?? "none"} hfr={hfr?.ToString("F2") ?? "n/a"}");
-            await _apiClient.IngestFramesAsync(
-                sessionId,
-                new List<FrameInput> { frame });
+                Logger.Info($"[Subframes] Frame cached: sessionId={sessionId} frameNumber={frameNumber} filter={filter ?? "none"} hfr={hfr?.ToString("F2") ?? "n/a"}");
         }
         catch (Exception ex)
         {
             Logger.Error($"[Subframes] Unexpected error in PostFrameAsync: {ex.Message}");
         }
+
+        return Task.CompletedTask;
     }
 
     // ── Heartbeat timer ──────────────────────────────────────────────────────
