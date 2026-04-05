@@ -1,3 +1,4 @@
+using System.IO.Compression;
 using System.Net.Http;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
@@ -15,6 +16,10 @@ namespace Subframes.NinaPlugin.Api;
 /// propagating an exception to the NINA sequence engine.
 ///
 /// Authentication uses a Bearer token (API key with prefix astk_live_).
+/// Request bodies are gzip-compressed. Data-bearing calls (session start/end,
+/// frame ingest) are retried up to 3 times with 1 s / 2 s / 4 s exponential
+/// backoff on 5xx and network errors. 4xx errors (except 429) are not retried.
+/// Heartbeats are fire-and-forget and are not retried.
 /// </summary>
 public sealed class SubframesClient : IDisposable
 {
@@ -23,6 +28,9 @@ public sealed class SubframesClient : IDisposable
         PropertyNameCaseInsensitive = true,
         NumberHandling = JsonNumberHandling.AllowNamedFloatingPointLiterals
     };
+
+    // Delays in ms between retry attempts: attempt 1→2, 2→3, 3→4
+    private static readonly int[] RetryDelaysMs = [1000, 2000, 4000];
 
     private readonly HttpClient _http;
     private readonly PluginOptions _options;
@@ -58,6 +66,117 @@ public sealed class SubframesClient : IDisposable
         }
     }
 
+    // ── Retry + Gzip helpers ─────────────────────────────────────────────────
+
+    /// <summary>
+    /// Serializes <paramref name="body"/> to JSON bytes for use with
+    /// <see cref="PostWithRetryAsync"/>.
+    /// </summary>
+    private static byte[] SerializeJson<T>(T body) =>
+        JsonSerializer.SerializeToUtf8Bytes(body, JsonOptions);
+
+    /// <summary>
+    /// Wraps JSON bytes in a gzip-compressed <see cref="HttpContent"/> with
+    /// the appropriate Content-Type and Content-Encoding headers.
+    /// </summary>
+    private static HttpContent CreateGzipContent(byte[] jsonBytes)
+    {
+        var ms = new MemoryStream();
+        using (var gz = new GZipStream(ms, CompressionMode.Compress, leaveOpen: true))
+            gz.Write(jsonBytes, 0, jsonBytes.Length);
+        ms.Position = 0;
+
+        var content = new StreamContent(ms);
+        content.Headers.ContentType =
+            new MediaTypeHeaderValue("application/json") { CharSet = "utf-8" };
+        content.Headers.ContentEncoding.Add("gzip");
+        return content;
+    }
+
+    /// <summary>
+    /// POST <paramref name="jsonBytes"/> to <paramref name="url"/> with
+    /// exponential backoff retry (up to 4 total attempts: delays 1 s, 2 s, 4 s).
+    ///
+    /// Retry policy:
+    ///  - 5xx responses and network errors → retry with backoff
+    ///  - 429 Too Many Requests → honour Retry-After header (capped at 30 s)
+    ///  - 4xx (except 429) → return immediately without retry
+    ///
+    /// The caller is responsible for disposing the returned response.
+    /// Throws <see cref="OperationCanceledException"/> if <paramref name="ct"/>
+    /// is cancelled.
+    /// </summary>
+    private async Task<HttpResponseMessage> PostWithRetryAsync(
+        string url,
+        byte[] jsonBytes,
+        CancellationToken ct)
+    {
+        HttpResponseMessage? response = null;
+        int totalAttempts = RetryDelaysMs.Length + 1; // 4
+
+        for (int attempt = 0; attempt < totalAttempts; attempt++)
+        {
+            response?.Dispose();
+
+            try
+            {
+                var content = CreateGzipContent(jsonBytes);
+                response = await _http.PostAsync(url, content, ct);
+
+                if (response.IsSuccessStatusCode)
+                    return response;
+
+                var statusCode = (int)response.StatusCode;
+
+                // 4xx except 429: client error, do not retry
+                if (statusCode is >= 400 and < 500 and not 429)
+                    return response;
+
+                // Final attempt — return whatever we have
+                if (attempt == totalAttempts - 1)
+                    return response;
+
+                // Determine delay
+                int delayMs;
+                if (statusCode == 429 &&
+                    response.Headers.RetryAfter?.Delta is TimeSpan delta)
+                {
+                    delayMs = (int)Math.Min(delta.TotalMilliseconds, 30_000);
+                    Logger.Info($"[Subframes] Rate limited (429). Retry-After {delayMs} ms. " +
+                                $"Attempt {attempt + 1}/{totalAttempts}");
+                }
+                else
+                {
+                    delayMs = RetryDelaysMs[attempt];
+                    Logger.Info($"[Subframes] HTTP {statusCode} from {url}, " +
+                                $"retrying in {delayMs} ms (attempt {attempt + 1}/{totalAttempts})");
+                }
+
+                await Task.Delay(delayMs, ct);
+            }
+            catch (OperationCanceledException)
+            {
+                response?.Dispose();
+                throw;
+            }
+            catch (HttpRequestException ex)
+            {
+                response?.Dispose();
+                response = null;
+
+                if (attempt == totalAttempts - 1)
+                    throw;
+
+                Logger.Info($"[Subframes] Network error on attempt {attempt + 1}/{totalAttempts}: " +
+                            $"{ex.Message}, retrying in {RetryDelaysMs[attempt]} ms");
+                await Task.Delay(RetryDelaysMs[attempt], ct);
+            }
+        }
+
+        // Should be unreachable, but satisfies the compiler
+        throw new InvalidOperationException("Retry loop exited without a response");
+    }
+
     // ── Session Start ────────────────────────────────────────────────────────
 
     /// <summary>
@@ -74,9 +193,11 @@ public sealed class SubframesClient : IDisposable
         {
             SetAuthHeader();
             var url = $"{BaseUrl}/api/v1/ingest/session/start";
+            var jsonBytes = SerializeJson(request);
             if (_options.IsDebugEnabled)
-                Logger.Info($"[Subframes] POST {url} body={JsonSerializer.Serialize(request, JsonOptions)}");
-            using var response = await _http.PostAsJsonAsync(url, request, JsonOptions, ct);
+                Logger.Info($"[Subframes] POST {url} body={System.Text.Encoding.UTF8.GetString(jsonBytes)}");
+
+            using var response = await PostWithRetryAsync(url, jsonBytes, ct);
             response.EnsureSuccessStatusCode();
 
             var envelope = await response.Content
@@ -116,9 +237,11 @@ public sealed class SubframesClient : IDisposable
                 SessionId = sessionId,
                 EndTime = DateTime.UtcNow.ToString("o")
             };
+            var jsonBytes = SerializeJson(body);
             if (_options.IsDebugEnabled)
-                Logger.Info($"[Subframes] POST {url} body={JsonSerializer.Serialize(body, JsonOptions)}");
-            using var response = await _http.PostAsJsonAsync(url, body, JsonOptions, ct);
+                Logger.Info($"[Subframes] POST {url} body={System.Text.Encoding.UTF8.GetString(jsonBytes)}");
+
+            using var response = await PostWithRetryAsync(url, jsonBytes, ct);
             response.EnsureSuccessStatusCode();
             Logger.Info($"[Subframes] Session ended: {sessionId}");
         }
@@ -133,7 +256,7 @@ public sealed class SubframesClient : IDisposable
 
     /// <summary>
     /// Fire-and-forget session heartbeat. Uses a dedicated 5-second timeout
-    /// so a slow server never blocks the caller.
+    /// so a slow server never blocks the caller. Not retried.
     /// </summary>
     public async Task SendHeartbeatAsync(
         HeartbeatRequest request,
@@ -169,6 +292,7 @@ public sealed class SubframesClient : IDisposable
     /// <summary>
     /// Fire-and-forget station-level heartbeat. Independent of any imaging session.
     /// Uses a dedicated 5-second timeout so a slow server never blocks the caller.
+    /// Not retried.
     /// </summary>
     public async Task SendStationHeartbeatAsync(
         StationHeartbeatRequest request,
@@ -221,9 +345,11 @@ public sealed class SubframesClient : IDisposable
                 SessionId = sessionId,
                 Frames = frames
             };
+            var jsonBytes = SerializeJson(body);
             if (_options.IsDebugEnabled)
-                Logger.Info($"[Subframes] POST {url} body={JsonSerializer.Serialize(body, JsonOptions)}");
-            using var response = await _http.PostAsJsonAsync(url, body, JsonOptions, ct);
+                Logger.Info($"[Subframes] POST {url} body={System.Text.Encoding.UTF8.GetString(jsonBytes)}");
+
+            using var response = await PostWithRetryAsync(url, jsonBytes, ct);
             response.EnsureSuccessStatusCode();
 
             var envelope = await response.Content
