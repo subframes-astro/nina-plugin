@@ -65,7 +65,16 @@ Output is at `SubframesPlugin/bin/Release/net8.0-windows/Subframes.NinaPlugin.dl
 
 1. Locate your NINA plugins folder (default: `%LOCALAPPDATA%\NINA\Plugins\`).
 2. Create a subfolder: `%LOCALAPPDATA%\NINA\Plugins\Subframes\`.
-3. Copy `Subframes.NinaPlugin.dll` (and any other output DLLs) into that folder.
+3. Copy **all DLLs** from the build output directory into that folder.
+   From `SubframesPlugin/bin/Release/net8.0-windows/`, copy:
+   - `Subframes.NinaPlugin.dll`
+   - `Microsoft.Data.Sqlite.dll`
+   - `SQLitePCLRaw.core.dll`
+   - `SQLitePCLRaw.nativelibrary.dll`
+   - `SQLitePCLRaw.provider.winsqlite3.dll`
+
+   > **Important:** The plugin will fail to load in NINA if these companion DLLs are missing.
+   > NINA's plugin loader resolves dependencies from the plugin's own subfolder.
 4. Start NINA. The plugin will appear in the plugin manager.
 
 ## Configuring the plugin
@@ -162,6 +171,7 @@ Response: {
 | Exposures not appearing in dashboard | Session item not in sequence | Add "Start Subframes Session" to your sequence start |
 | 401 Unauthorized in NINA log | Invalid or revoked API key | Generate a new API key and update plugin settings |
 | Plugin not visible in NINA | DLL not in plugins folder | Re-check the install path; check NINA's plugin log for load errors |
+| "Could not load file or assembly 'Microsoft.Data.Sqlite'" in NINA log | Dependency DLLs not copied | Copy **all DLLs** from the build output into `%LOCALAPPDATA%\NINA\Plugins\Subframes\` — not just `Subframes.NinaPlugin.dll` |
 
 ## License
 

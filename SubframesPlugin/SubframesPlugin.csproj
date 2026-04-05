@@ -8,7 +8,11 @@
     <PlatformTarget>x64</PlatformTarget>
     <AssemblyName>Subframes.NinaPlugin</AssemblyName>
     <RootNamespace>Subframes.NinaPlugin</RootNamespace>
-    <Version>0.1.6</Version>
+    <Version>0.1.7</Version>
+    <!-- Ensure all NuGet dependency DLLs are copied to the build output dir.
+         NINA's AssemblyResolve hook looks in the plugin subfolder, so all
+         managed dependencies must be present there alongside the plugin DLL. -->
+    <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
     <Authors>Subframes</Authors>
     <Company>Subframes</Company>
     <AssemblyTitle>Subframes</AssemblyTitle>
@@ -70,8 +74,11 @@
     <PackageReference Include="System.ComponentModel.Composition" Version="8.*" />
     <!-- MVVM source generators for [ObservableProperty], [RelayCommand] etc. -->
     <PackageReference Include="CommunityToolkit.Mvvm" Version="8.*" />
-    <!-- SQLite for offline frame caching -->
-    <PackageReference Include="Microsoft.Data.Sqlite" Version="8.*" />
+    <!-- SQLite for offline frame caching.
+         Use Core (no bundled native) + winsqlite3 so we rely on Windows' built-in
+         winsqlite3.dll (Win 8.1+) and avoid distributing a native e_sqlite3.dll. -->
+    <PackageReference Include="Microsoft.Data.Sqlite.Core" Version="8.*" />
+    <PackageReference Include="SQLitePCLRaw.bundle_winsqlite3" Version="2.*" />
   </ItemGroup>
 
   <!-- Assembly attributes consumed by NINA's PluginBase to populate manifest metadata -->
