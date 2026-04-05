@@ -47,6 +47,14 @@ public class PluginOptions
     /// <summary>Hours to retain synced frames before pruning (default 72 = 3 days).</summary>
     public int CacheRetentionHours { get; set; } = 72;
 
+    // ── Auto-Session Detection ───────────────────────────────────────────────
+
+    /// <summary>When true, automatically start/end sessions based on target changes and inactivity.</summary>
+    public bool AutoSessionDetection { get; set; } = true;
+
+    /// <summary>Minutes of inactivity after which an auto-session is ended (default 30).</summary>
+    public int SessionTimeoutMinutes { get; set; } = 30;
+
     // ── Persistence ──────────────────────────────────────────────────────────
 
     /// <summary>Load settings from disk, or return defaults if not present.</summary>

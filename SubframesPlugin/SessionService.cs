@@ -37,6 +37,11 @@ public sealed class SessionService : IDisposable
     private CancellationTokenSource? _heartbeatCts;
     private Task? _heartbeatTask;
 
+    // Auto-session detection state
+    private volatile bool _isManualSession;
+    private DateTime _lastFrameTime;
+    private int _autoSessionGuard; // Interlocked: 0 = idle, 1 = auto-start in progress
+
     private sealed record HeartbeatSnapshot(string? Filter, double? LatestHfr, double? LatestRmsTotal);
 
     /// <summary>Replace non-finite doubles (NaN, ±Infinity) with null so JSON serialization never throws.</summary>
@@ -83,6 +88,7 @@ public sealed class SessionService : IDisposable
             Logger.Info($"[Subframes] Session started: {sessionId} target='{request.TargetName}'");
             if (_options.IsDebugEnabled)
                 Logger.Info($"[Subframes] Session start confirmed: sessionId={sessionId} target='{request.TargetName}'");
+            _isManualSession = true;
             _currentTarget = request.TargetName;
             _snapshot = new HeartbeatSnapshot(null, null, null);
             _sessionStartTime = DateTime.UtcNow;
@@ -127,7 +133,41 @@ public sealed class SessionService : IDisposable
 
     private void OnImageSaved(object? sender, ImageSavedEventArgs e)
     {
+        _lastFrameTime = DateTime.UtcNow;
         var sessionId = _activeSessionId;
+
+        // Auto-detection: start/transition sessions without an explicit StartSessionItem.
+        if (!_isManualSession)
+        {
+            var options = PluginOptions.Load();
+            if (options.IsEnabled && options.AutoSessionDetection)
+            {
+                var rawTarget = e.MetaData?.Target?.Name;
+                var targetName = string.IsNullOrWhiteSpace(rawTarget)
+                    ? "Unknown Target"
+                    : CatalogNameNormalizer.Normalize(rawTarget);
+
+                if (sessionId is null)
+                {
+                    // No active session — auto-start one; frame is posted inside StartAutoSessionAsync.
+                    _ = StartAutoSessionAsync(targetName, e, "first frame");
+                    return;
+                }
+
+                // Active auto-session — check for target change.
+                var normalizedCurrent = string.IsNullOrEmpty(_currentTarget)
+                    ? string.Empty
+                    : CatalogNameNormalizer.Normalize(_currentTarget);
+                if (!string.IsNullOrEmpty(normalizedCurrent)
+                    && !string.Equals(normalizedCurrent, targetName, StringComparison.OrdinalIgnoreCase))
+                {
+                    Logger.Info($"[Subframes] Auto-session boundary: target changed from '{_currentTarget}' to '{targetName}'");
+                    _ = StartAutoSessionAsync(targetName, e, "target change");
+                    return;
+                }
+            }
+        }
+
         if (sessionId is null) return;
 
         // Fire-and-forget, but capture exceptions so nothing leaks to NINA.
@@ -182,6 +222,64 @@ public sealed class SessionService : IDisposable
         return Task.CompletedTask;
     }
 
+    // ── Auto-session detection ───────────────────────────────────────────────
+
+    /// <summary>
+    /// Ends any active auto-session, then starts a new one for <paramref name="targetName"/>.
+    /// Fires the triggering <paramref name="e"/> as the first frame of the new session.
+    /// Re-entrant calls while an auto-start is in progress are silently dropped.
+    /// </summary>
+    private async Task StartAutoSessionAsync(string targetName, ImageSavedEventArgs e, string reason)
+    {
+        if (Interlocked.CompareExchange(ref _autoSessionGuard, 1, 0) != 0) return;
+        try
+        {
+            var options = PluginOptions.Load();
+            if (!options.IsEnabled || !options.AutoSessionDetection) return;
+
+            // End existing auto-session before transitioning.
+            if (_activeSessionId is not null)
+                await EndSessionAsync(CancellationToken.None);
+
+            var request = new StartSessionRequest
+            {
+                TargetName   = targetName,
+                TargetRa     = e.MetaData?.Target?.Coordinates?.RA ?? 0.0,
+                TargetDec    = e.MetaData?.Target?.Coordinates?.Dec ?? 0.0,
+                StartTime    = DateTime.UtcNow.ToString("o"),
+                InstanceId   = string.IsNullOrWhiteSpace(options.InstanceId) ? null : options.InstanceId,
+                InstanceName = string.IsNullOrWhiteSpace(options.InstanceName) ? null : options.InstanceName,
+            };
+
+            var sessionId = await _apiClient.StartSessionAsync(request, CancellationToken.None);
+            _activeSessionId = sessionId;
+            Interlocked.Exchange(ref _frameCounter, 0);
+
+            if (sessionId is not null)
+            {
+                _isManualSession = false;
+                Logger.Info($"[Subframes] Auto-session started: target='{targetName}' (trigger: {reason})");
+                _currentTarget = targetName;
+                _snapshot = new HeartbeatSnapshot(null, null, null);
+                _sessionStartTime = DateTime.UtcNow;
+                StartHeartbeatTimer(sessionId);
+                await PostFrameAsync(sessionId, e);
+            }
+            else
+            {
+                Logger.Warning("[Subframes] Auto-session start failed — API unreachable?");
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.Error($"[Subframes] Auto-session start error: {ex.Message}");
+        }
+        finally
+        {
+            Interlocked.Exchange(ref _autoSessionGuard, 0);
+        }
+    }
+
     // ── Heartbeat timer ──────────────────────────────────────────────────────
 
     private void StartHeartbeatTimer(string sessionId)
@@ -207,6 +305,22 @@ public sealed class SessionService : IDisposable
         {
             while (await timer.WaitForNextTickAsync(ct))
             {
+                // Auto-session inactivity timeout
+                if (!_isManualSession && _lastFrameTime != default)
+                {
+                    var opts = PluginOptions.Load();
+                    if (opts.AutoSessionDetection)
+                    {
+                        var idleMinutes = (DateTime.UtcNow - _lastFrameTime).TotalMinutes;
+                        if (idleMinutes >= opts.SessionTimeoutMinutes)
+                        {
+                            Logger.Info($"[Subframes] Auto-session ended: no frames for {(int)idleMinutes} minutes");
+                            await EndSessionAsync(CancellationToken.None);
+                            return;
+                        }
+                    }
+                }
+
                 var snap = _snapshot;
                 var payload = new HeartbeatRequest
                 {
