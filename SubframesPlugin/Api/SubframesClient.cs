@@ -1,5 +1,3 @@
-using System.IO;
-using System.IO.Compression;
 using System.Net.Http;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
@@ -17,9 +15,9 @@ namespace Subframes.NinaPlugin.Api;
 /// propagating an exception to the NINA sequence engine.
 ///
 /// Authentication uses a Bearer token (API key with prefix astk_live_).
-/// Request bodies are gzip-compressed. Data-bearing calls (session start/end,
-/// frame ingest) are retried up to 3 times with 1 s / 2 s / 4 s exponential
-/// backoff on 5xx and network errors. 4xx errors (except 429) are not retried.
+/// Data-bearing calls (session start/end, frame ingest) are retried up to
+/// 3 times with 1 s / 2 s / 4 s exponential backoff on 5xx and network errors.
+/// 4xx errors (except 429) are not retried.
 /// Heartbeats are fire-and-forget and are not retried.
 /// </summary>
 public sealed class SubframesClient : IDisposable
@@ -67,7 +65,7 @@ public sealed class SubframesClient : IDisposable
         }
     }
 
-    // ── Retry + Gzip helpers ─────────────────────────────────────────────────
+    // ── Retry helpers ───────────────────────────────────────────────────────
 
     /// <summary>
     /// Serializes <paramref name="body"/> to JSON bytes for use with
@@ -77,20 +75,14 @@ public sealed class SubframesClient : IDisposable
         JsonSerializer.SerializeToUtf8Bytes(body, JsonOptions);
 
     /// <summary>
-    /// Wraps JSON bytes in a gzip-compressed <see cref="HttpContent"/> with
-    /// the appropriate Content-Type and Content-Encoding headers.
+    /// Wraps JSON bytes in an <see cref="HttpContent"/> with
+    /// the appropriate Content-Type header.
     /// </summary>
-    private static HttpContent CreateGzipContent(byte[] jsonBytes)
+    private static HttpContent CreateJsonContent(byte[] jsonBytes)
     {
-        var ms = new MemoryStream();
-        using (var gz = new GZipStream(ms, CompressionMode.Compress, leaveOpen: true))
-            gz.Write(jsonBytes, 0, jsonBytes.Length);
-        ms.Position = 0;
-
-        var content = new StreamContent(ms);
+        var content = new ByteArrayContent(jsonBytes);
         content.Headers.ContentType =
             new MediaTypeHeaderValue("application/json") { CharSet = "utf-8" };
-        content.Headers.ContentEncoding.Add("gzip");
         return content;
     }
 
@@ -121,7 +113,7 @@ public sealed class SubframesClient : IDisposable
 
             try
             {
-                var content = CreateGzipContent(jsonBytes);
+                var content = CreateJsonContent(jsonBytes);
                 response = await _http.PostAsync(url, content, ct);
 
                 if (response.IsSuccessStatusCode)
@@ -199,7 +191,12 @@ public sealed class SubframesClient : IDisposable
                 Logger.Info($"[Subframes] POST {url} body={System.Text.Encoding.UTF8.GetString(jsonBytes)}");
 
             using var response = await PostWithRetryAsync(url, jsonBytes, ct);
-            response.EnsureSuccessStatusCode();
+            if (!response.IsSuccessStatusCode)
+            {
+                var body = await response.Content.ReadAsStringAsync(ct);
+                Logger.Error($"[Subframes] StartSession HTTP {(int)response.StatusCode}: {body}");
+                return null;
+            }
 
             var envelope = await response.Content
                 .ReadFromJsonAsync<ApiEnvelope<StartSessionData>>(JsonOptions, ct);
