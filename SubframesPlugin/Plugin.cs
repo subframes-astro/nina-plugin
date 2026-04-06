@@ -242,16 +242,19 @@ public class SubframesPlugin : PluginBase, IPluginManifest
     {
         var devices = new List<DeviceDto>(8);
 
-        DeviceDto Slot(string category, string? name, bool connected, string? driverVersion = null) =>
-            new() { Category = category, Name = string.IsNullOrEmpty(name) ? null : name, Connected = connected, DriverVersion = driverVersion };
+        void Add(string category, string? name, bool connected, string? driverVersion = null)
+        {
+            if (!connected && string.IsNullOrEmpty(name)) return;
+            devices.Add(new DeviceDto { Category = category, Name = string.IsNullOrEmpty(name) ? null : name, Connected = connected, DriverVersion = driverVersion });
+        }
 
-        try { var i = _cameraMediator.GetInfo();      devices.Add(Slot("Camera",      i.Name, i.Connected)); } catch { /* device not available */ }
-        try { var i = _telescopeMediator.GetInfo();   devices.Add(Slot("Mount",        i.Name, i.Connected)); } catch { /* device not available */ }
-        try { var i = _focuserMediator.GetInfo();     devices.Add(Slot("Focuser",     i.Name, i.Connected)); } catch { /* device not available */ }
-        try { var i = _filterWheelMediator.GetInfo(); devices.Add(Slot("FilterWheel", i.Name, i.Connected)); } catch { /* device not available */ }
-        try { var i = _rotatorMediator.GetInfo();     devices.Add(Slot("Rotator",     i.Name, i.Connected)); } catch { /* device not available */ }
-        try { var i = _guiderMediator.GetInfo();      devices.Add(Slot("Guider",      i.Name, i.Connected)); } catch { /* device not available */ }
-        try { var i = _flatDeviceMediator.GetInfo();  devices.Add(Slot("FlatPanel",   i.Name, i.Connected)); } catch { /* device not available */ }
+        try { var i = _cameraMediator.GetInfo();      Add("Camera",      i.Name, i.Connected); } catch { /* device not available */ }
+        try { var i = _telescopeMediator.GetInfo();   Add("Mount",        i.Name, i.Connected); } catch { /* device not available */ }
+        try { var i = _focuserMediator.GetInfo();     Add("Focuser",     i.Name, i.Connected); } catch { /* device not available */ }
+        try { var i = _filterWheelMediator.GetInfo(); Add("FilterWheel", i.Name, i.Connected); } catch { /* device not available */ }
+        try { var i = _rotatorMediator.GetInfo();     Add("Rotator",     i.Name, i.Connected); } catch { /* device not available */ }
+        try { var i = _guiderMediator.GetInfo();      Add("Guider",      i.Name, i.Connected); } catch { /* device not available */ }
+        try { var i = _flatDeviceMediator.GetInfo();  Add("FlatPanel",   i.Name, i.Connected); } catch { /* device not available */ }
 
         return devices;
     }
