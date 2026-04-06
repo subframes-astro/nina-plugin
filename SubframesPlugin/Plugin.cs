@@ -26,6 +26,7 @@ file static class DoubleExtensions
 /// </summary>
 [Export(typeof(IPluginManifest))]
 [Export(typeof(SubframesPlugin))]
+[PartCreationPolicy(CreationPolicy.Shared)]
 public class SubframesPlugin : PluginBase, IPluginManifest
 {
     private readonly SessionService _sessionService;
