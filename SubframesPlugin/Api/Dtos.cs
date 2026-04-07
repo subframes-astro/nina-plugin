@@ -106,6 +106,56 @@ public sealed class HeartbeatRequest
     public string? InstanceName { get; init; }
 }
 
+/// <summary>Body for POST /api/v1/ingest/session/target/start</summary>
+public sealed class StartSessionTargetRequest
+{
+    [JsonPropertyName("sessionId")]
+    public required string SessionId { get; init; }
+
+    [JsonPropertyName("targetName")]
+    public required string TargetName { get; init; }
+
+    [JsonPropertyName("targetRa")]
+    public double TargetRa { get; init; }
+
+    [JsonPropertyName("targetDec")]
+    public double TargetDec { get; init; }
+
+    [JsonPropertyName("startTime")]
+    public required string StartTime { get; init; }
+
+    [JsonPropertyName("targetType")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? TargetType { get; init; }
+}
+
+/// <summary>Body for POST /api/v1/ingest/session/target/end</summary>
+public sealed class EndSessionTargetRequest
+{
+    [JsonPropertyName("sessionId")]
+    public required string SessionId { get; init; }
+
+    [JsonPropertyName("sessionTargetId")]
+    public required string SessionTargetId { get; init; }
+
+    [JsonPropertyName("endTime")]
+    public required string EndTime { get; init; }
+}
+
+/// <summary>Body for POST /api/v1/ingest/session/status</summary>
+public sealed class UpdateSessionStatusRequest
+{
+    [JsonPropertyName("sessionId")]
+    public required string SessionId { get; init; }
+
+    [JsonPropertyName("status")]
+    public required string Status { get; init; }
+
+    [JsonPropertyName("waitReason")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? WaitReason { get; init; }
+}
+
 /// <summary>Body for POST /api/v1/ingest/frame</summary>
 public sealed class IngestFramesRequest
 {
@@ -121,6 +171,10 @@ public sealed class FrameInput
 {
     [JsonPropertyName("frameNumber")]
     public int FrameNumber { get; init; }
+
+    [JsonPropertyName("sessionTargetId")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? SessionTargetId { get; init; }
 
     [JsonPropertyName("exposureTime")]
     public double ExposureTime { get; init; }
@@ -367,6 +421,30 @@ public sealed class StartSessionData
 
 /// <summary>Response payload from POST /api/v1/ingest/session/end</summary>
 public sealed class EndSessionData
+{
+    [JsonPropertyName("status")]
+    public string? Status { get; init; }
+}
+
+/// <summary>Response payload from POST /api/v1/ingest/session/target/start</summary>
+public sealed class StartSessionTargetData
+{
+    [JsonPropertyName("sessionTargetId")]
+    public string? SessionTargetId { get; init; }
+
+    [JsonPropertyName("status")]
+    public string? Status { get; init; }
+}
+
+/// <summary>Response payload from POST /api/v1/ingest/session/target/end</summary>
+public sealed class EndSessionTargetData
+{
+    [JsonPropertyName("status")]
+    public string? Status { get; init; }
+}
+
+/// <summary>Response payload from POST /api/v1/ingest/session/status</summary>
+public sealed class UpdateSessionStatusData
 {
     [JsonPropertyName("status")]
     public string? Status { get; init; }

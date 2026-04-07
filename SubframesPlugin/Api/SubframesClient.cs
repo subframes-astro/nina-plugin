@@ -250,6 +250,132 @@ public sealed class SubframesClient : IDisposable
         }
     }
 
+    // ── Session Target Start ─────────────────────────────────────────────────
+
+    /// <summary>
+    /// Signal that the sequencer has switched to a new target within the active session.
+    /// Returns the server-assigned sessionTargetId, or null if the call failed or the
+    /// endpoint does not exist on this API version (404 → graceful no-op).
+    /// </summary>
+    public async Task<string?> StartTargetAsync(
+        StartSessionTargetRequest request,
+        CancellationToken ct = default)
+    {
+        if (!_options.IsEnabled) return null;
+
+        try
+        {
+            SetAuthHeader();
+            var url = $"{BaseUrl}/api/v1/ingest/session/target/start";
+            var jsonBytes = SerializeJson(request);
+            if (_options.IsDebugEnabled)
+                Logger.Info($"[Subframes] POST {url} body={System.Text.Encoding.UTF8.GetString(jsonBytes)}");
+
+            using var response = await PostWithRetryAsync(url, jsonBytes, ct);
+
+            // 404 means the API version doesn't support multi-target — fall back silently.
+            if (response.StatusCode == System.Net.HttpStatusCode.NotFound)
+            {
+                Logger.Info("[Subframes] target/start endpoint not found — running single-target mode");
+                return null;
+            }
+
+            response.EnsureSuccessStatusCode();
+
+            var envelope = await response.Content
+                .ReadFromJsonAsync<ApiEnvelope<StartSessionTargetData>>(JsonOptions, ct);
+            var targetId = envelope?.Data?.SessionTargetId;
+            Logger.Info($"[Subframes] Target started: {targetId} name='{request.TargetName}'");
+            return targetId;
+        }
+        catch (OperationCanceledException)
+        {
+            return null;
+        }
+        catch (Exception ex)
+        {
+            Logger.Warning($"[Subframes] StartTarget failed: {ex.Message}");
+            return null;
+        }
+    }
+
+    // ── Session Target End ───────────────────────────────────────────────────
+
+    /// <summary>
+    /// Signal that the current target has completed.
+    /// 404 → no-op (older API). All other failures are logged and swallowed.
+    /// </summary>
+    public async Task EndTargetAsync(
+        EndSessionTargetRequest request,
+        CancellationToken ct = default)
+    {
+        if (!_options.IsEnabled) return;
+
+        try
+        {
+            SetAuthHeader();
+            var url = $"{BaseUrl}/api/v1/ingest/session/target/end";
+            var jsonBytes = SerializeJson(request);
+            if (_options.IsDebugEnabled)
+                Logger.Info($"[Subframes] POST {url} body={System.Text.Encoding.UTF8.GetString(jsonBytes)}");
+
+            using var response = await PostWithRetryAsync(url, jsonBytes, ct);
+
+            if (response.StatusCode == System.Net.HttpStatusCode.NotFound)
+            {
+                Logger.Debug("[Subframes] target/end endpoint not found — no-op");
+                return;
+            }
+
+            response.EnsureSuccessStatusCode();
+            Logger.Info($"[Subframes] Target ended: {request.SessionTargetId}");
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception ex)
+        {
+            Logger.Warning($"[Subframes] EndTarget failed: {ex.Message}");
+        }
+    }
+
+    // ── Session Status ───────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Update the session status (waiting / active / paused).
+    /// 404 → no-op (older API). All other failures are logged and swallowed.
+    /// </summary>
+    public async Task UpdateSessionStatusAsync(
+        UpdateSessionStatusRequest request,
+        CancellationToken ct = default)
+    {
+        if (!_options.IsEnabled) return;
+
+        try
+        {
+            SetAuthHeader();
+            var url = $"{BaseUrl}/api/v1/ingest/session/status";
+            var jsonBytes = SerializeJson(request);
+            if (_options.IsDebugEnabled)
+                Logger.Info($"[Subframes] POST {url} body={System.Text.Encoding.UTF8.GetString(jsonBytes)}");
+
+            using var response = await PostWithRetryAsync(url, jsonBytes, ct);
+
+            if (response.StatusCode == System.Net.HttpStatusCode.NotFound)
+            {
+                Logger.Debug("[Subframes] session/status endpoint not found — no-op");
+                return;
+            }
+
+            response.EnsureSuccessStatusCode();
+            Logger.Info($"[Subframes] Session status updated: {request.Status}" +
+                        (request.WaitReason is not null ? $" ({request.WaitReason})" : ""));
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception ex)
+        {
+            Logger.Warning($"[Subframes] UpdateSessionStatus failed: {ex.Message}");
+        }
+    }
+
     // ── Heartbeat ────────────────────────────────────────────────────────────
 
     /// <summary>

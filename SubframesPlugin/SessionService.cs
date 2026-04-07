@@ -27,7 +27,11 @@ public sealed class SessionService : IDisposable
     private readonly SyncEngine _syncEngine;
 
     private volatile string? _activeSessionId;
+    private volatile string? _activeSessionTargetId;
     private int _frameCounter;
+
+    // Session status — "active", "waiting", "paused". Volatile for cross-thread visibility.
+    private volatile string _sessionStatus = "active";
 
     // Heartbeat timer state
     private volatile string? _currentTarget;
@@ -68,6 +72,9 @@ public sealed class SessionService : IDisposable
     /// <summary>The server-assigned session ID, or null if no session is active.</summary>
     public string? ActiveSessionId => _activeSessionId;
 
+    /// <summary>The server-assigned session target ID for the current target, or null.</summary>
+    public string? ActiveSessionTargetId => _activeSessionTargetId;
+
     /// <summary>True when an imaging session is currently active.</summary>
     public bool HasActiveSession => _activeSessionId is not null;
 
@@ -90,6 +97,8 @@ public sealed class SessionService : IDisposable
                 Logger.Info($"[Subframes] Session start confirmed: sessionId={sessionId} target='{request.TargetName}'");
             _isManualSession = true;
             _currentTarget = request.TargetName;
+            _activeSessionTargetId = null;
+            _sessionStatus = "active";
             _snapshot = new HeartbeatSnapshot(null, null, null);
             _sessionStartTime = DateTime.UtcNow;
             StartHeartbeatTimer(sessionId);
@@ -117,6 +126,8 @@ public sealed class SessionService : IDisposable
 
         StopHeartbeatTimer();
         _activeSessionId = null;
+        _activeSessionTargetId = null;
+        _sessionStatus = "active";
         await _apiClient.EndSessionAsync(sessionId, ct);
         Logger.Info("[Subframes] Session ended.");
     }
@@ -127,6 +138,93 @@ public sealed class SessionService : IDisposable
         StopHeartbeatTimer();
         _activeSessionId = null;
         Logger.Info("[Subframes] Session cleared.");
+    }
+
+    // ── Target lifecycle ─────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Signal that the sequencer has switched to a new imaging target.
+    /// Stores the returned sessionTargetId so subsequent frames are associated with it.
+    /// Safe to call when no session is active — returns null with no API call.
+    /// </summary>
+    public async Task<string?> StartTargetAsync(
+        string targetName,
+        double targetRa,
+        double targetDec,
+        string? targetType = null,
+        CancellationToken ct = default)
+    {
+        var sessionId = _activeSessionId;
+        if (sessionId is null) return null;
+
+        var request = new StartSessionTargetRequest
+        {
+            SessionId  = sessionId,
+            TargetName = targetName,
+            TargetRa   = targetRa,
+            TargetDec  = targetDec,
+            StartTime  = DateTime.UtcNow.ToString("o"),
+            TargetType = targetType,
+        };
+
+        var targetId = await _apiClient.StartTargetAsync(request, ct);
+        _activeSessionTargetId = targetId;
+        _currentTarget = targetName;
+        _sessionStatus = "active";
+
+        if (targetId is not null)
+            Logger.Info($"[Subframes] Target started: {targetId} name='{targetName}'");
+
+        return targetId;
+    }
+
+    /// <summary>
+    /// Signal that the current target has completed.
+    /// Clears the active sessionTargetId. Safe to call when no target is active.
+    /// </summary>
+    public async Task EndTargetAsync(CancellationToken ct = default)
+    {
+        var sessionId = _activeSessionId;
+        var targetId  = _activeSessionTargetId;
+        if (sessionId is null || targetId is null) return;
+
+        _activeSessionTargetId = null;
+
+        var request = new EndSessionTargetRequest
+        {
+            SessionId       = sessionId,
+            SessionTargetId = targetId,
+            EndTime         = DateTime.UtcNow.ToString("o"),
+        };
+
+        await _apiClient.EndTargetAsync(request, ct);
+    }
+
+    // ── Status transitions ───────────────────────────────────────────────────
+
+    /// <summary>
+    /// Update the session status (waiting / active / paused).
+    /// For "waiting", supply a human-readable <paramref name="waitReason"/>.
+    /// Safe to call when no session is active — returns immediately.
+    /// </summary>
+    public async Task UpdateStatusAsync(
+        string status,
+        string? waitReason = null,
+        CancellationToken ct = default)
+    {
+        var sessionId = _activeSessionId;
+        if (sessionId is null) return;
+
+        _sessionStatus = status;
+
+        var request = new UpdateSessionStatusRequest
+        {
+            SessionId  = sessionId,
+            Status     = status,
+            WaitReason = waitReason,
+        };
+
+        await _apiClient.UpdateSessionStatusAsync(request, ct);
     }
 
     // ── ImageSaved handler ───────────────────────────────────────────────────
@@ -192,19 +290,30 @@ public sealed class SessionService : IDisposable
             // RMS guiding data is not available from ImageSavedEventArgs; left null for now.
             _snapshot = new HeartbeatSnapshot(filter, Finite(hfr), null);
 
+            // If the session was in a waiting/paused state, a new exposure means we're active again.
+            // Fire-and-forget the status transition; don't block the imaging path.
+            if (_sessionStatus != "active")
+            {
+                _sessionStatus = "active";
+                _ = _apiClient.UpdateSessionStatusAsync(
+                    new UpdateSessionStatusRequest { SessionId = sessionId, Status = "active" },
+                    CancellationToken.None);
+            }
+
             var frame = new FrameInput
             {
-                FrameNumber  = frameNumber,
-                ExposureTime = meta.Image?.ExposureTime ?? 0.0,
-                CapturedAt   = capturedAt,
-                Filter       = filter,
-                Gain         = meta.Camera?.Gain,
-                Offset       = meta.Camera?.Offset,
-                Binning      = meta.Camera?.BinX is int b ? (short)b : null,
-                Hfr          = Finite(hfr),
-                HfrStdev     = Finite(e.StarDetectionAnalysis?.HFRStDev),
-                StarCount    = e.StarDetectionAnalysis?.DetectedStars,
-                CameraTemp   = Finite(meta.Camera?.Temperature),
+                FrameNumber     = frameNumber,
+                SessionTargetId = _activeSessionTargetId,
+                ExposureTime    = meta.Image?.ExposureTime ?? 0.0,
+                CapturedAt      = capturedAt,
+                Filter          = filter,
+                Gain            = meta.Camera?.Gain,
+                Offset          = meta.Camera?.Offset,
+                Binning         = meta.Camera?.BinX is int b ? (short)b : null,
+                Hfr             = Finite(hfr),
+                HfrStdev        = Finite(e.StarDetectionAnalysis?.HFRStDev),
+                StarCount       = e.StarDetectionAnalysis?.DetectedStars,
+                CameraTemp      = Finite(meta.Camera?.Temperature),
             };
 
             // Write to local SQLite cache — never blocks, never throws.
@@ -212,7 +321,7 @@ public sealed class SessionService : IDisposable
             _frameCache.InsertFrame(sessionId, frame);
 
             if (_options.IsDebugEnabled)
-                Logger.Info($"[Subframes] Frame cached: sessionId={sessionId} frameNumber={frameNumber} filter={filter ?? "none"} hfr={hfr?.ToString("F2") ?? "n/a"}");
+                Logger.Info($"[Subframes] Frame cached: sessionId={sessionId} frameNumber={frameNumber} targetId={_activeSessionTargetId ?? "none"} filter={filter ?? "none"} hfr={hfr?.ToString("F2") ?? "n/a"}");
         }
         catch (Exception ex)
         {
