@@ -237,8 +237,8 @@ public sealed class SessionService : IDisposable
     /// enabled and no session is active, opens a session immediately so the
     /// dashboard reflects the run from the moment the user hits "Start".
     /// Target info comes from <see cref="NINA.Sequencer.Interfaces.Mediator.ISequenceMediator.GetAllTargets"/>
-    /// when available; otherwise falls back to "Unknown Target" and adopts
-    /// the real target name from the first captured image.
+    /// when available; otherwise sends an empty target name (the backend skips
+    /// auto-creation for empty names) and adopts the real target from the first captured image.
     /// </summary>
     public async Task OnSequenceStartedAsync(string? targetName, double targetRa, double targetDec)
     {
@@ -254,7 +254,7 @@ public sealed class SessionService : IDisposable
             if (_activeSessionId is not null) return;
 
             var hasTarget = !string.IsNullOrWhiteSpace(targetName);
-            var resolvedTarget = hasTarget ? targetName! : "Unknown Target";
+            var resolvedTarget = hasTarget ? targetName! : string.Empty;
 
             var request = new StartSessionRequest
             {
@@ -312,7 +312,7 @@ public sealed class SessionService : IDisposable
             {
                 var rawTarget = e.MetaData?.Target?.Name;
                 var targetName = string.IsNullOrWhiteSpace(rawTarget)
-                    ? "Unknown Target"
+                    ? string.Empty
                     : CatalogNameNormalizer.Normalize(rawTarget);
 
                 if (sessionId is null)
