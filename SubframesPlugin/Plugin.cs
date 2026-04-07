@@ -281,9 +281,6 @@ public class SubframesPlugin : PluginBase, IPluginManifest, IPartImportsSatisfie
     /// </summary>
     private Task OnSequenceStarted(object sender, EventArgs e)
     {
-        if (_sessionService.HasActiveSession)
-            return Task.CompletedTask;
-
         string? targetName = null;
         double targetRa = 0, targetDec = 0;
         try
@@ -307,6 +304,16 @@ public class SubframesPlugin : PluginBase, IPluginManifest, IPartImportsSatisfie
         catch (Exception ex)
         {
             Logger.Debug($"[Subframes] Could not read targets from sequence: {ex.Message}");
+        }
+
+        if (_sessionService.HasActiveSession)
+        {
+            // Session already active (e.g. manual StartSubframesSession ran first).
+            // If we found a real target, register it immediately so the web app
+            // updates without waiting for the first exposure to complete.
+            if (!string.IsNullOrWhiteSpace(targetName))
+                _ = _sessionService.OnTargetDetectedAsync(targetName, targetRa, targetDec);
+            return Task.CompletedTask;
         }
 
         _ = _sessionService.OnSequenceStartedAsync(targetName, targetRa, targetDec);

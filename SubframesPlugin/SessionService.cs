@@ -230,6 +230,72 @@ public sealed class SessionService : IDisposable
         await _apiClient.UpdateSessionStatusAsync(request, ct);
     }
 
+    // ── Target detection ───────────────────────────────────────────────────
+
+    /// <summary>
+    /// Called when a target is detected externally (from GetAllTargets or ImageSaved metadata).
+    /// If the target differs from the current tracked target, ends any active target, registers
+    /// the new one via <see cref="StartTargetAsync"/>, and fires an immediate heartbeat so the
+    /// web app updates without waiting for the next 60-second tick.
+    /// Safe to call from any thread; no-op if no session is active.
+    /// </summary>
+    public async Task OnTargetDetectedAsync(string targetName, double targetRa, double targetDec)
+    {
+        var sessionId = _activeSessionId;
+        if (sessionId is null) return;
+
+        var normalized = CatalogNameNormalizer.Normalize(targetName);
+
+        // Don't "detect" an unknown target.
+        if (string.Equals(normalized, "Unknown Target", StringComparison.OrdinalIgnoreCase))
+            return;
+
+        // Same target — nothing to do.
+        if (!string.IsNullOrEmpty(_currentTarget)
+            && string.Equals(CatalogNameNormalizer.Normalize(_currentTarget), normalized, StringComparison.OrdinalIgnoreCase))
+            return;
+
+        Logger.Info($"[Subframes] Target detected: '{normalized}' (was '{_currentTarget ?? "none"}')");
+
+        // End current target if one is active.
+        if (_activeSessionTargetId is not null)
+        {
+            try { await EndTargetAsync(CancellationToken.None); }
+            catch (Exception ex) { Logger.Warning($"[Subframes] EndTarget failed during target detection: {ex.Message}"); }
+        }
+
+        // Register the new target.
+        await StartTargetAsync(normalized, targetRa, targetDec, null, CancellationToken.None);
+
+        // Fire an immediate heartbeat so the web app reflects the change right away.
+        FireImmediateHeartbeat(sessionId);
+    }
+
+    /// <summary>
+    /// Sends a heartbeat immediately (outside the regular 60-second timer) so the web app
+    /// reflects state changes like target detection without waiting for the next tick.
+    /// </summary>
+    private void FireImmediateHeartbeat(string sessionId)
+    {
+        var snap = _snapshot;
+        var payload = new HeartbeatRequest
+        {
+            SessionId      = sessionId,
+            Status         = "imaging",
+            CurrentTarget  = _currentTarget,
+            CurrentFilter  = snap.Filter,
+            ExposureCount  = _frameCounter,
+            LatestHfr      = snap.LatestHfr,
+            LatestRmsTotal = snap.LatestRmsTotal,
+            UptimeMinutes  = (int)(DateTime.UtcNow - _sessionStartTime).TotalMinutes,
+            InstanceId     = string.IsNullOrWhiteSpace(_options.InstanceId) ? null : _options.InstanceId,
+            InstanceName   = string.IsNullOrWhiteSpace(_options.InstanceName) ? null : _options.InstanceName,
+        };
+        if (_options.IsDebugEnabled)
+            Logger.Info($"[Subframes] Immediate heartbeat: sessionId={sessionId} target='{_currentTarget}'");
+        _ = _apiClient.SendHeartbeatAsync(payload, CancellationToken.None);
+    }
+
     // ── Sequence-start auto-session ─────────────────────────────────────────
 
     /// <summary>
@@ -338,6 +404,18 @@ public sealed class SessionService : IDisposable
                     _ = StartAutoSessionAsync(targetName, e, "target change");
                     return;
                 }
+            }
+        }
+        else if (sessionId is not null)
+        {
+            // Manual session — detect and register target changes automatically
+            // so the web app updates when the sequencer moves to a new target.
+            var rawTarget = e.MetaData?.Target?.Name;
+            if (!string.IsNullOrWhiteSpace(rawTarget))
+            {
+                var targetRa = e.MetaData?.Target?.Coordinates?.RA ?? 0.0;
+                var targetDec = e.MetaData?.Target?.Coordinates?.Dec ?? 0.0;
+                _ = OnTargetDetectedAsync(rawTarget, targetRa, targetDec);
             }
         }
 
