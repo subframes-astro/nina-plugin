@@ -237,8 +237,18 @@ public sealed class SessionService : IDisposable
             var options = PluginOptions.Load();
             if (!options.IsEnabled || !options.AutoSessionDetection) return;
 
-            // End existing auto-session before transitioning.
-            if (_activeSessionId is not null)
+            // Re-check after acquiring the guard: another task may have already
+            // started a session between our null-check in OnImageSaved and now.
+            var existing = _activeSessionId;
+            if (existing is not null && reason == "first frame")
+            {
+                Logger.Info($"[Subframes] Auto-session already active ({existing}), posting frame instead of starting duplicate");
+                await PostFrameAsync(existing, e);
+                return;
+            }
+
+            // End existing auto-session before transitioning (target change).
+            if (existing is not null)
                 await EndSessionAsync(CancellationToken.None);
 
             var request = new StartSessionRequest
