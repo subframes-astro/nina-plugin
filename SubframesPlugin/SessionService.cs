@@ -419,7 +419,7 @@ public sealed class SessionService : IDisposable
     {
         try
         {
-            var bitmap = e.Image?.Image;
+            var bitmap = e.Image;
             if (bitmap is null)
             {
                 Logger.Debug($"[Subframes] SendThumbnail skipped: no bitmap (frame={frameNumber})");
