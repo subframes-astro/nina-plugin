@@ -59,6 +59,8 @@ public class SubframesPlugin : PluginBase, IPluginManifest, IPartImportsSatisfie
     public ISequenceMediator? SequenceMediator { get; set; }
 
     private bool _sequenceEventsSubscribed;
+    // Stored so we can remove the reflection-added SequenceStarted handler in Teardown.
+    private Delegate? _sequenceStartedDelegate;
     private CancellationTokenSource? _sequenceRetrySubscribeCts;
     private CancellationTokenSource? _stationHeartbeatCts;
     private Task? _stationHeartbeatTask;
@@ -169,10 +171,24 @@ public class SubframesPlugin : PluginBase, IPluginManifest, IPartImportsSatisfie
     {
         try
         {
-            SequenceMediator!.SequenceStarted += OnSequenceStarted;
             SequenceMediator!.SequenceFinished += OnSequenceFinished;
+
+            // SequenceStarted was added in NINA 3.1.3+.  Subscribe via reflection so the
+            // plugin compiles and runs on SDK 3.1.2.9001 and degrades gracefully there.
+            var seqStartedEvent = SequenceMediator.GetType().GetEvent("SequenceStarted");
+            if (seqStartedEvent?.EventHandlerType is Type evtType)
+            {
+                _sequenceStartedDelegate = Delegate.CreateDelegate(evtType, this, nameof(OnSequenceStarted));
+                seqStartedEvent.AddEventHandler(SequenceMediator, _sequenceStartedDelegate);
+                Logger.Debug("[Subframes] Subscribed to ISequenceMediator.SequenceStarted (via reflection).");
+            }
+            else
+            {
+                Logger.Info("[Subframes] ISequenceMediator.SequenceStarted not present in this NINA build — session will open on first captured image instead.");
+            }
+
             _sequenceEventsSubscribed = true;
-            Logger.Debug("[Subframes] Subscribed to ISequenceMediator.SequenceStarted and SequenceFinished.");
+            Logger.Debug("[Subframes] Subscribed to ISequenceMediator.SequenceFinished.");
             return true;
         }
         catch (Exception ex)
@@ -234,7 +250,12 @@ public class SubframesPlugin : PluginBase, IPluginManifest, IPartImportsSatisfie
             _sequenceRetrySubscribeCts = null;
             if (_sequenceEventsSubscribed && SequenceMediator is not null)
             {
-                SequenceMediator.SequenceStarted -= OnSequenceStarted;
+                if (_sequenceStartedDelegate != null)
+                {
+                    SequenceMediator.GetType().GetEvent("SequenceStarted")
+                        ?.RemoveEventHandler(SequenceMediator, _sequenceStartedDelegate);
+                    _sequenceStartedDelegate = null;
+                }
                 SequenceMediator.SequenceFinished -= OnSequenceFinished;
             }
             StopStationHeartbeat();
@@ -267,16 +288,19 @@ public class SubframesPlugin : PluginBase, IPluginManifest, IPartImportsSatisfie
         double targetRa = 0, targetDec = 0;
         try
         {
-            var targets = SequenceMediator?.GetAllTargets();
+            // GetAllTargets() was added in NINA 3.1.3+.  Call via reflection so the
+            // plugin compiles against SDK 3.1.2.9001 and degrades gracefully there.
+            var getAllTargets = SequenceMediator?.GetType().GetMethod("GetAllTargets");
+            var targets = getAllTargets?.Invoke(SequenceMediator, null) as System.Collections.IList;
             if (targets is { Count: > 0 })
             {
-                var first = targets[0];
-                string? name = first.Name;
+                dynamic first = targets[0]!;
+                string? name = first.Name as string;
                 if (!string.IsNullOrWhiteSpace(name))
                 {
                     targetName = CatalogNameNormalizer.Normalize(name);
-                    targetRa  = first.Coordinates.RA;
-                    targetDec = first.Coordinates.Dec;
+                    try { targetRa  = (double)first.Coordinates.RA;  } catch { }
+                    try { targetDec = (double)first.Coordinates.Dec; } catch { }
                 }
             }
         }
