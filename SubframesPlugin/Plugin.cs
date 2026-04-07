@@ -58,6 +58,8 @@ public class SubframesPlugin : PluginBase, IPluginManifest, IPartImportsSatisfie
     [Import(AllowDefault = true)]
     public ISequenceMediator? SequenceMediator { get; set; }
 
+    private bool _sequenceFinishedSubscribed;
+    private CancellationTokenSource? _sequenceRetrySubscribeCts;
     private CancellationTokenSource? _stationHeartbeatCts;
     private Task? _stationHeartbeatTask;
 
@@ -140,23 +142,65 @@ public class SubframesPlugin : PluginBase, IPluginManifest, IPartImportsSatisfie
     /// <summary>
     /// Called by MEF after all imports (including optional ones) are satisfied.
     /// Subscribes to SequenceFinished if ISequenceMediator was resolved.
-    /// Wrapped in try-catch so a failure here never prevents the plugin from loading.
+    /// Because NINA's SequenceMediator is lazy (internals are null until
+    /// RegisterSequenceNavigation is called later), the subscription may fail
+    /// at this point.  If so, a background task retries every 2s for up to 60s.
     /// </summary>
     public void OnImportsSatisfied()
     {
+        if (!_isPrimary || SequenceMediator is null)
+            return;
+
+        if (TrySubscribeSequenceFinished())
+            return;
+
+        // SequenceMediator exists but internals aren't ready yet — retry in background.
+        Logger.Warning("[Subframes] SequenceFinished subscription deferred — SequenceMediator internals not yet initialized.");
+        var cts = new CancellationTokenSource();
+        _sequenceRetrySubscribeCts = cts;
+        _ = RetrySubscribeSequenceFinishedAsync(cts.Token);
+    }
+
+    /// <summary>
+    /// Attempts to subscribe to SequenceFinished. Returns true on success.
+    /// </summary>
+    private bool TrySubscribeSequenceFinished()
+    {
         try
         {
-            var seq = SequenceMediator;
-            if (_isPrimary && seq is not null)
-            {
-                seq.SequenceFinished += OnSequenceFinished;
-                Logger.Debug("[Subframes] Subscribed to ISequenceMediator.SequenceFinished.");
-            }
+            SequenceMediator!.SequenceFinished += OnSequenceFinished;
+            _sequenceFinishedSubscribed = true;
+            Logger.Debug("[Subframes] Subscribed to ISequenceMediator.SequenceFinished.");
+            return true;
         }
         catch (Exception ex)
         {
-            Logger.Error($"[Subframes] OnImportsSatisfied failed (non-fatal): {ex}");
+            Logger.Debug($"[Subframes] SequenceFinished subscription attempt failed: {ex.Message}");
+            return false;
         }
+    }
+
+    /// <summary>
+    /// Retries SequenceFinished subscription every 2 seconds, giving up after 60 seconds.
+    /// </summary>
+    private async Task RetrySubscribeSequenceFinishedAsync(CancellationToken ct)
+    {
+        const int retryIntervalMs = 2_000;
+        const int maxRetries = 30; // 30 × 2s = 60s
+
+        for (int i = 0; i < maxRetries; i++)
+        {
+            try { await Task.Delay(retryIntervalMs, ct); }
+            catch (OperationCanceledException) { return; }
+
+            if (TrySubscribeSequenceFinished())
+            {
+                Logger.Info($"[Subframes] Deferred SequenceFinished subscription succeeded after {(i + 1) * 2}s.");
+                return;
+            }
+        }
+
+        Logger.Warning("[Subframes] Gave up subscribing to SequenceFinished after 60s — sessions will not auto-close on sequence end.");
     }
 
     /// <summary>
@@ -183,7 +227,10 @@ public class SubframesPlugin : PluginBase, IPluginManifest, IPartImportsSatisfie
     {
         if (_isPrimary)
         {
-            if (SequenceMediator is not null)
+            _sequenceRetrySubscribeCts?.Cancel();
+            _sequenceRetrySubscribeCts?.Dispose();
+            _sequenceRetrySubscribeCts = null;
+            if (_sequenceFinishedSubscribed && SequenceMediator is not null)
                 SequenceMediator.SequenceFinished -= OnSequenceFinished;
             StopStationHeartbeat();
             _syncEngine.Dispose();
