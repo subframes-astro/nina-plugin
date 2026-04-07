@@ -293,13 +293,19 @@ public class SubframesPlugin : PluginBase, IPluginManifest, IPartImportsSatisfie
             var targets = getAllTargets?.Invoke(SequenceMediator, null) as System.Collections.IList;
             if (targets is { Count: > 0 })
             {
-                dynamic first = targets[0]!;
-                string? name = first.Name as string;
+                var first = targets[0]!;
+                var firstType = first.GetType();
+
+                // Use explicit reflection instead of dynamic to avoid DLR cross-assembly
+                // binding failures that silently swallow property access.
+                var name = firstType.GetProperty("Name")?.GetValue(first) as string;
+                if (string.IsNullOrWhiteSpace(name))
+                    name = ReflectNestedString(first, firstType, "Target", "TargetName");
+
                 if (!string.IsNullOrWhiteSpace(name))
                 {
                     targetName = CatalogNameNormalizer.Normalize(name);
-                    try { targetRa  = (double)first.Coordinates.RA;  } catch { }
-                    try { targetDec = (double)first.Coordinates.Dec; } catch { }
+                    (targetRa, targetDec) = ReflectCoordinates(first, firstType);
                 }
             }
         }
@@ -353,20 +359,25 @@ public class SubframesPlugin : PluginBase, IPluginManifest, IPartImportsSatisfie
 
             foreach (var t in targets)
             {
-                dynamic target = t!;
-                string? statusStr = null;
-                try { statusStr = target.Status?.ToString(); } catch { }
+                if (t is null) continue;
+                var type = t.GetType();
+
+                // Status lives on ISequenceEntity — use reflection to avoid DLR
+                // cross-assembly binding failures that silently swallow the property.
+                var statusStr = type.GetProperty("Status")?.GetValue(t)?.ToString();
                 if (!string.Equals(statusStr, "RUNNING", StringComparison.OrdinalIgnoreCase))
                     continue;
 
-                string? name = null;
-                double ra = 0, dec = 0;
-                try { name = target.Name as string; } catch { }
+                // Name: try ISequenceItem.Name first, fall back to Target.TargetName.
+                var name = type.GetProperty("Name")?.GetValue(t) as string;
+                if (string.IsNullOrWhiteSpace(name))
+                    name = ReflectNestedString(t, type, "Target", "TargetName");
                 if (string.IsNullOrWhiteSpace(name))
                     continue;
 
-                try { ra  = (double)target.Coordinates.RA;  } catch { }
-                try { dec = (double)target.Coordinates.Dec; } catch { }
+                // Coordinates: try direct Coordinates.RA/Dec (concrete class),
+                // then Target.InputCoordinates.Coordinates.RA/Dec.
+                var (ra, dec) = ReflectCoordinates(t, type);
 
                 return (CatalogNameNormalizer.Normalize(name), ra, dec);
             }
@@ -376,6 +387,59 @@ public class SubframesPlugin : PluginBase, IPluginManifest, IPartImportsSatisfie
             Logger.Debug($"[Subframes] ResolveActiveTarget failed: {ex.Message}");
         }
         return null;
+    }
+
+    /// <summary>Read a nested string property via reflection: obj.prop1.prop2.</summary>
+    private static string? ReflectNestedString(object obj, Type type, string prop1, string prop2)
+    {
+        try
+        {
+            var intermediate = type.GetProperty(prop1)?.GetValue(obj);
+            if (intermediate is null) return null;
+            return intermediate.GetType().GetProperty(prop2)?.GetValue(intermediate) as string;
+        }
+        catch { return null; }
+    }
+
+    /// <summary>
+    /// Extract RA/Dec from a DSO container via reflection. Tries direct Coordinates
+    /// property first (concrete DeepSkyObjectContainer), then Target.InputCoordinates.Coordinates.
+    /// </summary>
+    private static (double ra, double dec) ReflectCoordinates(object obj, Type type)
+    {
+        try
+        {
+            // Path 1: obj.Coordinates.RA / obj.Coordinates.Dec
+            var coords = type.GetProperty("Coordinates")?.GetValue(obj);
+            if (coords is not null)
+            {
+                var ct = coords.GetType();
+                var ra  = ct.GetProperty("RA")?.GetValue(coords);
+                var dec = ct.GetProperty("Dec")?.GetValue(coords);
+                if (ra is double r && dec is double d)
+                    return (r, d);
+            }
+        }
+        catch { /* fall through */ }
+
+        try
+        {
+            // Path 2: obj.Target.InputCoordinates.Coordinates.RA / .Dec
+            var target = type.GetProperty("Target")?.GetValue(obj);
+            if (target is null) return (0, 0);
+            var inputCoords = target.GetType().GetProperty("InputCoordinates")?.GetValue(target);
+            if (inputCoords is null) return (0, 0);
+            var coords = inputCoords.GetType().GetProperty("Coordinates")?.GetValue(inputCoords);
+            if (coords is null) return (0, 0);
+            var ct = coords.GetType();
+            var ra  = ct.GetProperty("RA")?.GetValue(coords);
+            var dec = ct.GetProperty("Dec")?.GetValue(coords);
+            if (ra is double r && dec is double d)
+                return (r, d);
+        }
+        catch { /* best effort */ }
+
+        return (0, 0);
     }
 
     // ── Station heartbeat ────────────────────────────────────────────────────
