@@ -29,6 +29,13 @@ file static class DoubleExtensions
 [PartCreationPolicy(CreationPolicy.Shared)]
 public class SubframesPlugin : PluginBase, IPluginManifest
 {
+    // Static primary-instance guard: NINA's MEF may create multiple instances
+    // across separate CompositionContainers.  Only the first instance owns the
+    // background services (SessionService, SyncEngine, station heartbeat).
+    // Secondary instances proxy to the primary's services so sequence items
+    // still work regardless of which MEF container resolved them.
+    private static SubframesPlugin? _primary;
+
     private readonly SessionService _sessionService;
     private readonly OptionsPanelViewModel _optionsVm;
     private readonly SubframesClient _apiClient;
@@ -43,6 +50,7 @@ public class SubframesPlugin : PluginBase, IPluginManifest
     private readonly IFlatDeviceMediator _flatDeviceMediator;
     private readonly FrameCache _frameCache;
     private readonly SyncEngine _syncEngine;
+    private readonly bool _isPrimary;
 
     private CancellationTokenSource? _stationHeartbeatCts;
     private Task? _stationHeartbeatTask;
@@ -59,6 +67,32 @@ public class SubframesPlugin : PluginBase, IPluginManifest
         IGuiderMediator guiderMediator,
         IFlatDeviceMediator flatDeviceMediator)
     {
+        // Atomically claim the primary slot.  If another instance already
+        // exists, proxy to its services and skip all background work.
+        var existing = Interlocked.CompareExchange(ref _primary, this, null);
+        if (existing is not null)
+        {
+            Logger.Warning("[Subframes] Duplicate plugin instance created by MEF — proxying to primary to prevent duplicate sessions/sync.");
+            _isPrimary = false;
+            // Share the primary's service objects so sequence items work.
+            _sessionService = existing._sessionService;
+            _optionsVm = existing._optionsVm;
+            _apiClient = existing._apiClient;
+            _options = existing._options;
+            _frameCache = existing._frameCache;
+            _syncEngine = existing._syncEngine;
+            _profileService = profileService;
+            _cameraMediator = cameraMediator;
+            _telescopeMediator = telescopeMediator;
+            _focuserMediator = focuserMediator;
+            _filterWheelMediator = filterWheelMediator;
+            _rotatorMediator = rotatorMediator;
+            _guiderMediator = guiderMediator;
+            _flatDeviceMediator = flatDeviceMediator;
+            return;
+        }
+
+        _isPrimary = true;
         _options = PluginOptions.Load();
         _apiClient = new SubframesClient(_options);
         _profileService = profileService;
@@ -84,7 +118,7 @@ public class SubframesPlugin : PluginBase, IPluginManifest
         if (pending > 0)
             Logger.Info($"[Subframes] {pending} cached frames pending sync from previous session.");
 
-        Logger.Info("[Subframes] Plugin loaded.");
+        Logger.Info("[Subframes] Plugin loaded (primary instance).");
     }
 
     // Expose singletons so MEF-constructed sequence items can import them.
@@ -103,6 +137,8 @@ public class SubframesPlugin : PluginBase, IPluginManifest
     /// </summary>
     internal void ApplyOptionsChange()
     {
+        if (!_isPrimary) return; // Secondary instances don't own background tasks.
+
         if (_options.IsEnabled && !string.IsNullOrWhiteSpace(_options.ApiKey))
         {
             StartStationHeartbeat();
@@ -117,11 +153,19 @@ public class SubframesPlugin : PluginBase, IPluginManifest
 
     public override async Task Teardown()
     {
-        StopStationHeartbeat();
-        _syncEngine.Dispose();
-        _sessionService.Dispose();
-        _frameCache.Dispose();
-        Logger.Info("[Subframes] Plugin unloaded.");
+        if (_isPrimary)
+        {
+            StopStationHeartbeat();
+            _syncEngine.Dispose();
+            _sessionService.Dispose();
+            _frameCache.Dispose();
+            Interlocked.CompareExchange(ref _primary, null, this);
+            Logger.Info("[Subframes] Plugin unloaded (primary instance).");
+        }
+        else
+        {
+            Logger.Info("[Subframes] Plugin unloaded (secondary proxy instance).");
+        }
         await base.Teardown();
     }
 
