@@ -440,7 +440,10 @@ public sealed class SubframesClient : IDisposable
                 Logger.Warning($"[Subframes] Station heartbeat failed: {(int)response.StatusCode} {response.ReasonPhrase} — {body}");
                 return;
             }
-            Logger.Debug($"[Subframes] Station heartbeat sent (status={request.Status})");
+            if (_options.IsDebugEnabled)
+                Logger.Info($"[Subframes] Station heartbeat accepted: {(int)response.StatusCode} (status={request.Status})");
+            else
+                Logger.Debug($"[Subframes] Station heartbeat sent (status={request.Status})");
         }
         catch (OperationCanceledException)
         {

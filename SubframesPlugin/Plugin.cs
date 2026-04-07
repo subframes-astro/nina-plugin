@@ -301,7 +301,7 @@ public class SubframesPlugin : PluginBase, IPluginManifest, IPartImportsSatisfie
                 MountName     = ts?.Name,
                 FilterWheel   = filterWheelName,
                 Filters       = filters is { Count: > 0 } ? filters : null,
-                Devices       = devices,
+                Devices       = devices is { Count: > 0 } ? devices : null,
             };
         }
         catch (Exception ex)
