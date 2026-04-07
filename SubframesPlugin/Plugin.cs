@@ -188,6 +188,7 @@ public class SubframesPlugin : PluginBase, IPluginManifest, IPartImportsSatisfie
             }
 
             _sequenceEventsSubscribed = true;
+            _sessionService.ActiveTargetResolver = ResolveActiveTarget;
             Logger.Debug("[Subframes] Subscribed to ISequenceMediator.SequenceFinished.");
             return true;
         }
@@ -258,6 +259,7 @@ public class SubframesPlugin : PluginBase, IPluginManifest, IPartImportsSatisfie
                 }
                 SequenceMediator.SequenceFinished -= OnSequenceFinished;
             }
+            _sessionService.ActiveTargetResolver = null;
             StopStationHeartbeat();
             _syncEngine.Dispose();
             _sessionService.Dispose();
@@ -333,6 +335,47 @@ public class SubframesPlugin : PluginBase, IPluginManifest, IPartImportsSatisfie
             _ = _sessionService.EndSessionAsync(CancellationToken.None);
         }
         return Task.CompletedTask;
+    }
+
+    /// <summary>
+    /// Called on every heartbeat tick by SessionService to detect the currently running
+    /// DSO container.  Uses reflection so the plugin degrades gracefully on NINA versions
+    /// that do not have GetAllTargets().
+    /// </summary>
+    private (string? name, double ra, double dec)? ResolveActiveTarget()
+    {
+        try
+        {
+            var getAllTargets = SequenceMediator?.GetType().GetMethod("GetAllTargets");
+            var targets = getAllTargets?.Invoke(SequenceMediator, null) as System.Collections.IList;
+            if (targets is null || targets.Count == 0)
+                return null;
+
+            foreach (var t in targets)
+            {
+                dynamic target = t!;
+                string? statusStr = null;
+                try { statusStr = target.Status?.ToString(); } catch { }
+                if (!string.Equals(statusStr, "RUNNING", StringComparison.OrdinalIgnoreCase))
+                    continue;
+
+                string? name = null;
+                double ra = 0, dec = 0;
+                try { name = target.Name as string; } catch { }
+                if (string.IsNullOrWhiteSpace(name))
+                    continue;
+
+                try { ra  = (double)target.Coordinates.RA;  } catch { }
+                try { dec = (double)target.Coordinates.Dec; } catch { }
+
+                return (CatalogNameNormalizer.Normalize(name), ra, dec);
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.Debug($"[Subframes] ResolveActiveTarget failed: {ex.Message}");
+        }
+        return null;
     }
 
     // ── Station heartbeat ────────────────────────────────────────────────────
