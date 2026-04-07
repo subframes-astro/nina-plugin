@@ -140,13 +140,22 @@ public class SubframesPlugin : PluginBase, IPluginManifest, IPartImportsSatisfie
     /// <summary>
     /// Called by MEF after all imports (including optional ones) are satisfied.
     /// Subscribes to SequenceFinished if ISequenceMediator was resolved.
+    /// Wrapped in try-catch so a failure here never prevents the plugin from loading.
     /// </summary>
     public void OnImportsSatisfied()
     {
-        if (_isPrimary && SequenceMediator is not null)
+        try
         {
-            SequenceMediator.SequenceFinished += OnSequenceFinished;
-            Logger.Debug("[Subframes] Subscribed to ISequenceMediator.SequenceFinished.");
+            var seq = SequenceMediator;
+            if (_isPrimary && seq is not null)
+            {
+                seq.SequenceFinished += OnSequenceFinished;
+                Logger.Debug("[Subframes] Subscribed to ISequenceMediator.SequenceFinished.");
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.Error($"[Subframes] OnImportsSatisfied failed (non-fatal): {ex}");
         }
     }
 
