@@ -308,7 +308,12 @@ public sealed class SubframesClient : IDisposable
             if (_options.IsDebugEnabled)
                 Logger.Info($"[Subframes] POST {url} body={JsonSerializer.Serialize(request, JsonOptions)}");
             using var response = await _http.PostAsJsonAsync(url, request, JsonOptions, cts.Token);
-            response.EnsureSuccessStatusCode();
+            if (!response.IsSuccessStatusCode)
+            {
+                var body = await response.Content.ReadAsStringAsync(cts.Token);
+                Logger.Warning($"[Subframes] Station heartbeat failed: {(int)response.StatusCode} {response.ReasonPhrase} — {body}");
+                return;
+            }
             Logger.Debug($"[Subframes] Station heartbeat sent (status={request.Status})");
         }
         catch (OperationCanceledException)

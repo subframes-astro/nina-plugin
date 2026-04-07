@@ -240,10 +240,10 @@ public class SubframesPlugin : PluginBase, IPluginManifest
                 TelescopeName = ts?.Name,
                 FocalLength   = DoubleExtensions.Finite(ts?.FocalLength),
                 Aperture      = DoubleExtensions.Finite(apertureDiameter),
-                CameraName    = cs?.Id,
+                CameraName    = cs?.Name,
                 PixelSize     = DoubleExtensions.Finite(cs?.PixelSize),
                 MountName     = ts?.Name,
-                FilterWheel   = fw?.Id,
+                FilterWheel   = fw?.Name,
                 Filters       = filters is { Count: > 0 } ? filters : null,
                 Devices       = devices,
             };

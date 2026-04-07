@@ -288,7 +288,8 @@ public sealed class StationEquipmentDto
     public List<string>? Filters { get; init; }
 
     [JsonPropertyName("accessories")]
-    public List<string> Accessories { get; init; } = [];
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public List<string>? Accessories { get; init; }
 
     [JsonPropertyName("devices")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
