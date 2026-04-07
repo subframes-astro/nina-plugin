@@ -72,6 +72,12 @@ public sealed class SessionService : IDisposable
         Logger.Debug("[Subframes] SessionService subscribed to ImageSaved.");
     }
 
+    /// <summary>
+    /// Set by Plugin.cs to resolve the currently running DSO container on each heartbeat tick.
+    /// Returns (normalizedName, ra, dec) for the active target, or null if unavailable.
+    /// </summary>
+    public Func<(string? name, double ra, double dec)?>? ActiveTargetResolver { get; set; }
+
     /// <summary>The server-assigned session ID, or null if no session is active.</summary>
     public string? ActiveSessionId => _activeSessionId;
 
@@ -639,6 +645,17 @@ public sealed class SessionService : IDisposable
                             return;
                         }
                     }
+                }
+
+                try
+                {
+                    var resolved = ActiveTargetResolver?.Invoke();
+                    if (resolved is var (name, ra, dec) && !string.IsNullOrWhiteSpace(name))
+                        await OnTargetDetectedAsync(name, ra, dec);
+                }
+                catch (Exception ex)
+                {
+                    Logger.Debug($"[Subframes] Active target poll failed: {ex.Message}");
                 }
 
                 var snap = _snapshot;

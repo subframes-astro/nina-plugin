@@ -188,6 +188,7 @@ public class SubframesPlugin : PluginBase, IPluginManifest, IPartImportsSatisfie
             }
 
             _sequenceEventsSubscribed = true;
+            _sessionService.ActiveTargetResolver = ResolveActiveTarget;
             Logger.Debug("[Subframes] Subscribed to ISequenceMediator.SequenceFinished.");
             return true;
         }
@@ -258,6 +259,7 @@ public class SubframesPlugin : PluginBase, IPluginManifest, IPartImportsSatisfie
                 }
                 SequenceMediator.SequenceFinished -= OnSequenceFinished;
             }
+            _sessionService.ActiveTargetResolver = null;
             StopStationHeartbeat();
             _syncEngine.Dispose();
             _sessionService.Dispose();
@@ -291,13 +293,19 @@ public class SubframesPlugin : PluginBase, IPluginManifest, IPartImportsSatisfie
             var targets = getAllTargets?.Invoke(SequenceMediator, null) as System.Collections.IList;
             if (targets is { Count: > 0 })
             {
-                dynamic first = targets[0]!;
-                string? name = first.Name as string;
+                var first = targets[0]!;
+                var firstType = first.GetType();
+
+                // Use explicit reflection instead of dynamic to avoid DLR cross-assembly
+                // binding failures that silently swallow property access.
+                var name = firstType.GetProperty("Name")?.GetValue(first) as string;
+                if (string.IsNullOrWhiteSpace(name))
+                    name = ReflectNestedString(first, firstType, "Target", "TargetName");
+
                 if (!string.IsNullOrWhiteSpace(name))
                 {
                     targetName = CatalogNameNormalizer.Normalize(name);
-                    try { targetRa  = (double)first.Coordinates.RA;  } catch { }
-                    try { targetDec = (double)first.Coordinates.Dec; } catch { }
+                    (targetRa, targetDec) = ReflectCoordinates(first, firstType);
                 }
             }
         }
@@ -333,6 +341,105 @@ public class SubframesPlugin : PluginBase, IPluginManifest, IPartImportsSatisfie
             _ = _sessionService.EndSessionAsync(CancellationToken.None);
         }
         return Task.CompletedTask;
+    }
+
+    /// <summary>
+    /// Called on every heartbeat tick by SessionService to detect the currently running
+    /// DSO container.  Uses reflection so the plugin degrades gracefully on NINA versions
+    /// that do not have GetAllTargets().
+    /// </summary>
+    private (string? name, double ra, double dec)? ResolveActiveTarget()
+    {
+        try
+        {
+            var getAllTargets = SequenceMediator?.GetType().GetMethod("GetAllTargets");
+            var targets = getAllTargets?.Invoke(SequenceMediator, null) as System.Collections.IList;
+            if (targets is null || targets.Count == 0)
+                return null;
+
+            foreach (var t in targets)
+            {
+                if (t is null) continue;
+                var type = t.GetType();
+
+                // Status lives on ISequenceEntity — use reflection to avoid DLR
+                // cross-assembly binding failures that silently swallow the property.
+                var statusStr = type.GetProperty("Status")?.GetValue(t)?.ToString();
+                if (!string.Equals(statusStr, "RUNNING", StringComparison.OrdinalIgnoreCase))
+                    continue;
+
+                // Name: try ISequenceItem.Name first, fall back to Target.TargetName.
+                var name = type.GetProperty("Name")?.GetValue(t) as string;
+                if (string.IsNullOrWhiteSpace(name))
+                    name = ReflectNestedString(t, type, "Target", "TargetName");
+                if (string.IsNullOrWhiteSpace(name))
+                    continue;
+
+                // Coordinates: try direct Coordinates.RA/Dec (concrete class),
+                // then Target.InputCoordinates.Coordinates.RA/Dec.
+                var (ra, dec) = ReflectCoordinates(t, type);
+
+                return (CatalogNameNormalizer.Normalize(name), ra, dec);
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.Debug($"[Subframes] ResolveActiveTarget failed: {ex.Message}");
+        }
+        return null;
+    }
+
+    /// <summary>Read a nested string property via reflection: obj.prop1.prop2.</summary>
+    private static string? ReflectNestedString(object obj, Type type, string prop1, string prop2)
+    {
+        try
+        {
+            var intermediate = type.GetProperty(prop1)?.GetValue(obj);
+            if (intermediate is null) return null;
+            return intermediate.GetType().GetProperty(prop2)?.GetValue(intermediate) as string;
+        }
+        catch { return null; }
+    }
+
+    /// <summary>
+    /// Extract RA/Dec from a DSO container via reflection. Tries direct Coordinates
+    /// property first (concrete DeepSkyObjectContainer), then Target.InputCoordinates.Coordinates.
+    /// </summary>
+    private static (double ra, double dec) ReflectCoordinates(object obj, Type type)
+    {
+        try
+        {
+            // Path 1: obj.Coordinates.RA / obj.Coordinates.Dec
+            var coords = type.GetProperty("Coordinates")?.GetValue(obj);
+            if (coords is not null)
+            {
+                var ct = coords.GetType();
+                var ra  = ct.GetProperty("RA")?.GetValue(coords);
+                var dec = ct.GetProperty("Dec")?.GetValue(coords);
+                if (ra is double r && dec is double d)
+                    return (r, d);
+            }
+        }
+        catch { /* fall through */ }
+
+        try
+        {
+            // Path 2: obj.Target.InputCoordinates.Coordinates.RA / .Dec
+            var target = type.GetProperty("Target")?.GetValue(obj);
+            if (target is null) return (0, 0);
+            var inputCoords = target.GetType().GetProperty("InputCoordinates")?.GetValue(target);
+            if (inputCoords is null) return (0, 0);
+            var coords = inputCoords.GetType().GetProperty("Coordinates")?.GetValue(inputCoords);
+            if (coords is null) return (0, 0);
+            var ct = coords.GetType();
+            var ra  = ct.GetProperty("RA")?.GetValue(coords);
+            var dec = ct.GetProperty("Dec")?.GetValue(coords);
+            if (ra is double r && dec is double d)
+                return (r, d);
+        }
+        catch { /* best effort */ }
+
+        return (0, 0);
     }
 
     // ── Station heartbeat ────────────────────────────────────────────────────
