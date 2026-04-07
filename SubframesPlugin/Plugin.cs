@@ -235,15 +235,24 @@ public class SubframesPlugin : PluginBase, IPluginManifest
                 .Select(f => f.Name!)
                 .ToList();
 
+            // ICameraSettings and IFilterWheelSettings no longer expose a Name property
+            // in NINA SDK 3.1.2+.  Fall back to the mediators' GetInfo() which report
+            // the connected device name at runtime.
+            string? cameraName = null;
+            try { cameraName = _cameraMediator.GetInfo().Name; } catch { }
+
+            string? filterWheelName = null;
+            try { filterWheelName = _filterWheelMediator.GetInfo().Name; } catch { }
+
             equipment = new StationEquipmentDto
             {
                 TelescopeName = ts?.Name,
                 FocalLength   = DoubleExtensions.Finite(ts?.FocalLength),
                 Aperture      = DoubleExtensions.Finite(apertureDiameter),
-                CameraName    = cs?.Name,
+                CameraName    = cameraName,
                 PixelSize     = DoubleExtensions.Finite(cs?.PixelSize),
                 MountName     = ts?.Name,
-                FilterWheel   = fw?.Name,
+                FilterWheel   = filterWheelName,
                 Filters       = filters is { Count: > 0 } ? filters : null,
                 Devices       = devices,
             };
