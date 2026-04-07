@@ -501,6 +501,59 @@ public sealed class SubframesClient : IDisposable
         }
     }
 
+    // ── Thumbnail Upload ─────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Fire-and-forget thumbnail upload. Posts JPEG bytes as multipart form data to
+    /// /api/v1/ingest/frame/thumbnail. Uses a 10-second timeout. Not retried.
+    /// 404 → no-op (endpoint not yet deployed). All exceptions are caught and logged.
+    /// </summary>
+    public async Task UploadThumbnailAsync(
+        string sessionId,
+        int frameNumber,
+        byte[] jpeg,
+        CancellationToken ct = default)
+    {
+        if (!_options.IsEnabled) return;
+
+        using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        cts.CancelAfter(TimeSpan.FromSeconds(10));
+
+        try
+        {
+            SetAuthHeader();
+            var url = $"{BaseUrl}/api/v1/ingest/frame/thumbnail";
+
+            using var form = new MultipartFormDataContent();
+            form.Add(new StringContent(sessionId), "sessionId");
+            form.Add(new StringContent(frameNumber.ToString()), "frameNumber");
+            var imageContent = new ByteArrayContent(jpeg);
+            imageContent.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("image/jpeg");
+            form.Add(imageContent, "thumbnail", "thumbnail.jpg");
+
+            using var response = await _http.PostAsync(url, form, cts.Token);
+
+            if (response.StatusCode == System.Net.HttpStatusCode.NotFound)
+            {
+                Logger.Info("[Subframes] Thumbnail endpoint not found — skipping (endpoint not yet deployed)");
+                return;
+            }
+
+            if (!response.IsSuccessStatusCode)
+                Logger.Warning($"[Subframes] UploadThumbnail HTTP {(int)response.StatusCode}");
+            else if (_options.IsDebugEnabled)
+                Logger.Info($"[Subframes] Thumbnail uploaded: sessionId={sessionId} frameNumber={frameNumber} size={jpeg.Length}B");
+        }
+        catch (OperationCanceledException)
+        {
+            Logger.Warning($"[Subframes] Thumbnail upload timed out (session={sessionId} frame={frameNumber})");
+        }
+        catch (Exception ex)
+        {
+            Logger.Warning($"[Subframes] UploadThumbnail failed (session={sessionId} frame={frameNumber}): {ex.Message}");
+        }
+    }
+
     // ── Health Check ───────────────────────────────────────────────────────
 
     /// <summary>

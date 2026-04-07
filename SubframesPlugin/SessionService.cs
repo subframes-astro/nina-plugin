@@ -1,3 +1,6 @@
+using System.IO;
+using System.Windows.Media;
+using System.Windows.Media.Imaging;
 using NINA.Core.Model;
 using NINA.Core.Utility;
 using NINA.WPF.Base.Interfaces.Mediator;
@@ -392,6 +395,9 @@ public sealed class SessionService : IDisposable
             // The SyncEngine will pick this up and batch-upload in the background.
             _frameCache.InsertFrame(sessionId, frame);
 
+            // Fire-and-forget thumbnail — must not delay frame caching or imaging.
+            _ = SendThumbnailAsync(sessionId, frameNumber, e);
+
             if (_options.IsDebugEnabled)
                 Logger.Info($"[Subframes] Frame cached: sessionId={sessionId} frameNumber={frameNumber} targetId={_activeSessionTargetId ?? "none"} filter={filter ?? "none"} hfr={hfr?.ToString("F2") ?? "n/a"}");
         }
@@ -401,6 +407,51 @@ public sealed class SessionService : IDisposable
         }
 
         return Task.CompletedTask;
+    }
+
+    // ── Thumbnail generation ─────────────────────────────────────────────────
+
+    /// <summary>
+    /// Scales the saved image to a 320-px-wide JPEG and uploads it.
+    /// Fire-and-forget — never blocks the imaging thread and never throws.
+    /// </summary>
+    private async Task SendThumbnailAsync(string sessionId, int frameNumber, ImageSavedEventArgs e)
+    {
+        try
+        {
+            var bitmap = e.Image?.Image;
+            if (bitmap is null)
+            {
+                Logger.Debug($"[Subframes] SendThumbnail skipped: no bitmap (frame={frameNumber})");
+                return;
+            }
+
+            // Freeze the BitmapSource so it can be accessed off the UI thread.
+            if (!bitmap.IsFrozen)
+                bitmap.Freeze();
+
+            // Scale to 320px wide, maintaining aspect ratio.
+            const int targetWidth = 320;
+            double scale = targetWidth / (double)bitmap.PixelWidth;
+            var scaled = new TransformedBitmap(bitmap, new ScaleTransform(scale, scale));
+            scaled.Freeze();
+
+            // Encode as JPEG at 75% quality.
+            byte[] jpegBytes;
+            var encoder = new JpegBitmapEncoder { QualityLevel = 75 };
+            encoder.Frames.Add(BitmapFrame.Create(scaled));
+            using (var ms = new MemoryStream())
+            {
+                encoder.Save(ms);
+                jpegBytes = ms.ToArray();
+            }
+
+            await _apiClient.UploadThumbnailAsync(sessionId, frameNumber, jpegBytes, CancellationToken.None);
+        }
+        catch (Exception ex)
+        {
+            Logger.Warning($"[Subframes] SendThumbnail error (session={sessionId} frame={frameNumber}): {ex.Message}");
+        }
     }
 
     // ── Auto-session detection ───────────────────────────────────────────────
