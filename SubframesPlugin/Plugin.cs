@@ -58,7 +58,7 @@ public class SubframesPlugin : PluginBase, IPluginManifest, IPartImportsSatisfie
     [Import(AllowDefault = true)]
     public ISequenceMediator? SequenceMediator { get; set; }
 
-    private bool _sequenceFinishedSubscribed;
+    private bool _sequenceEventsSubscribed;
     private CancellationTokenSource? _sequenceRetrySubscribeCts;
     private CancellationTokenSource? _stationHeartbeatCts;
     private Task? _stationHeartbeatTask;
@@ -141,49 +141,51 @@ public class SubframesPlugin : PluginBase, IPluginManifest, IPartImportsSatisfie
 
     /// <summary>
     /// Called by MEF after all imports (including optional ones) are satisfied.
-    /// Subscribes to SequenceFinished if ISequenceMediator was resolved.
-    /// Because NINA's SequenceMediator is lazy (internals are null until
-    /// RegisterSequenceNavigation is called later), the subscription may fail
-    /// at this point.  If so, a background task retries every 2s for up to 60s.
+    /// Subscribes to SequenceStarted and SequenceFinished if ISequenceMediator
+    /// was resolved.  Because NINA's SequenceMediator is lazy (internals are
+    /// null until RegisterSequenceNavigation is called later), the subscription
+    /// may fail at this point.  If so, a background task retries every 2s for
+    /// up to 60s.
     /// </summary>
     public void OnImportsSatisfied()
     {
         if (!_isPrimary || SequenceMediator is null)
             return;
 
-        if (TrySubscribeSequenceFinished())
+        if (TrySubscribeSequenceEvents())
             return;
 
         // SequenceMediator exists but internals aren't ready yet — retry in background.
-        Logger.Warning("[Subframes] SequenceFinished subscription deferred — SequenceMediator internals not yet initialized.");
+        Logger.Warning("[Subframes] Sequence event subscription deferred — SequenceMediator internals not yet initialized.");
         var cts = new CancellationTokenSource();
         _sequenceRetrySubscribeCts = cts;
-        _ = RetrySubscribeSequenceFinishedAsync(cts.Token);
+        _ = RetrySubscribeSequenceEventsAsync(cts.Token);
     }
 
     /// <summary>
-    /// Attempts to subscribe to SequenceFinished. Returns true on success.
+    /// Attempts to subscribe to SequenceStarted and SequenceFinished. Returns true on success.
     /// </summary>
-    private bool TrySubscribeSequenceFinished()
+    private bool TrySubscribeSequenceEvents()
     {
         try
         {
+            SequenceMediator!.SequenceStarted += OnSequenceStarted;
             SequenceMediator!.SequenceFinished += OnSequenceFinished;
-            _sequenceFinishedSubscribed = true;
-            Logger.Debug("[Subframes] Subscribed to ISequenceMediator.SequenceFinished.");
+            _sequenceEventsSubscribed = true;
+            Logger.Debug("[Subframes] Subscribed to ISequenceMediator.SequenceStarted and SequenceFinished.");
             return true;
         }
         catch (Exception ex)
         {
-            Logger.Debug($"[Subframes] SequenceFinished subscription attempt failed: {ex.Message}");
+            Logger.Debug($"[Subframes] Sequence event subscription attempt failed: {ex.Message}");
             return false;
         }
     }
 
     /// <summary>
-    /// Retries SequenceFinished subscription every 2 seconds, giving up after 60 seconds.
+    /// Retries sequence event subscription every 2 seconds, giving up after 60 seconds.
     /// </summary>
-    private async Task RetrySubscribeSequenceFinishedAsync(CancellationToken ct)
+    private async Task RetrySubscribeSequenceEventsAsync(CancellationToken ct)
     {
         const int retryIntervalMs = 2_000;
         const int maxRetries = 30; // 30 × 2s = 60s
@@ -193,14 +195,14 @@ public class SubframesPlugin : PluginBase, IPluginManifest, IPartImportsSatisfie
             try { await Task.Delay(retryIntervalMs, ct); }
             catch (OperationCanceledException) { return; }
 
-            if (TrySubscribeSequenceFinished())
+            if (TrySubscribeSequenceEvents())
             {
-                Logger.Info($"[Subframes] Deferred SequenceFinished subscription succeeded after {(i + 1) * 2}s.");
+                Logger.Info($"[Subframes] Deferred sequence event subscription succeeded after {(i + 1) * 2}s.");
                 return;
             }
         }
 
-        Logger.Warning("[Subframes] Gave up subscribing to SequenceFinished after 60s — sessions will not auto-close on sequence end.");
+        Logger.Warning("[Subframes] Gave up subscribing to sequence events after 60s — sessions will not auto-open/close on sequence start/end.");
     }
 
     /// <summary>
@@ -230,8 +232,11 @@ public class SubframesPlugin : PluginBase, IPluginManifest, IPartImportsSatisfie
             _sequenceRetrySubscribeCts?.Cancel();
             _sequenceRetrySubscribeCts?.Dispose();
             _sequenceRetrySubscribeCts = null;
-            if (_sequenceFinishedSubscribed && SequenceMediator is not null)
+            if (_sequenceEventsSubscribed && SequenceMediator is not null)
+            {
+                SequenceMediator.SequenceStarted -= OnSequenceStarted;
                 SequenceMediator.SequenceFinished -= OnSequenceFinished;
+            }
             StopStationHeartbeat();
             _syncEngine.Dispose();
             _sessionService.Dispose();
@@ -247,6 +252,41 @@ public class SubframesPlugin : PluginBase, IPluginManifest, IPartImportsSatisfie
     }
 
     // ── Sequence lifecycle ───────────────────────────────────────────────────
+
+    /// <summary>
+    /// Called by NINA when the advanced sequence starts.  Opens an auto-session
+    /// immediately so the dashboard reflects the imaging run from the moment
+    /// the user hits "Start" — not after the first exposure completes.
+    /// </summary>
+    private Task OnSequenceStarted(object sender, EventArgs e)
+    {
+        if (_sessionService.HasActiveSession)
+            return Task.CompletedTask;
+
+        string? targetName = null;
+        double targetRa = 0, targetDec = 0;
+        try
+        {
+            var targets = SequenceMediator?.GetAllTargets();
+            if (targets is { Count: > 0 })
+            {
+                var first = targets[0];
+                if (!string.IsNullOrWhiteSpace(first.Name))
+                {
+                    targetName = CatalogNameNormalizer.Normalize(first.Name);
+                    targetRa = first.Coordinates?.RA ?? 0;
+                    targetDec = first.Coordinates?.Dec ?? 0;
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.Debug($"[Subframes] Could not read targets from sequence: {ex.Message}");
+        }
+
+        _ = _sessionService.OnSequenceStartedAsync(targetName, targetRa, targetDec);
+        return Task.CompletedTask;
+    }
 
     /// <summary>
     /// Called by NINA when the advanced sequence finishes — whether it completed

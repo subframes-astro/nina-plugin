@@ -227,6 +227,73 @@ public sealed class SessionService : IDisposable
         await _apiClient.UpdateSessionStatusAsync(request, ct);
     }
 
+    // ── Sequence-start auto-session ─────────────────────────────────────────
+
+    /// <summary>
+    /// Called when the NINA sequence starts. If auto-session detection is
+    /// enabled and no session is active, opens a session immediately so the
+    /// dashboard reflects the run from the moment the user hits "Start".
+    /// Target info comes from <see cref="NINA.Sequencer.Interfaces.Mediator.ISequenceMediator.GetAllTargets"/>
+    /// when available; otherwise falls back to "Unknown Target" and adopts
+    /// the real target name from the first captured image.
+    /// </summary>
+    public async Task OnSequenceStartedAsync(string? targetName, double targetRa, double targetDec)
+    {
+        if (_isManualSession || _activeSessionId is not null) return;
+
+        var options = PluginOptions.Load();
+        if (!options.IsEnabled || !options.AutoSessionDetection) return;
+
+        if (Interlocked.CompareExchange(ref _autoSessionGuard, 1, 0) != 0) return;
+        try
+        {
+            // Re-check after guard: another path may have started a session.
+            if (_activeSessionId is not null) return;
+
+            var hasTarget = !string.IsNullOrWhiteSpace(targetName);
+            var resolvedTarget = hasTarget ? targetName! : "Unknown Target";
+
+            var request = new StartSessionRequest
+            {
+                TargetName   = resolvedTarget,
+                TargetRa     = targetRa,
+                TargetDec    = targetDec,
+                StartTime    = DateTime.UtcNow.ToString("o"),
+                InstanceId   = string.IsNullOrWhiteSpace(options.InstanceId) ? null : options.InstanceId,
+                InstanceName = string.IsNullOrWhiteSpace(options.InstanceName) ? null : options.InstanceName,
+            };
+
+            var sessionId = await _apiClient.StartSessionAsync(request, CancellationToken.None);
+            _activeSessionId = sessionId;
+            Interlocked.Exchange(ref _frameCounter, 0);
+
+            if (sessionId is not null)
+            {
+                _isManualSession = false;
+                // If we had a real target name, track it. Otherwise leave null
+                // so OnImageSaved adopts the target from the first exposure.
+                _currentTarget = hasTarget ? resolvedTarget : null;
+                _sessionStatus = "active";
+                _snapshot = new HeartbeatSnapshot(null, null, null);
+                _sessionStartTime = DateTime.UtcNow;
+                StartHeartbeatTimer(sessionId);
+                Logger.Info($"[Subframes] Auto-session started on sequence start: sessionId={sessionId} target='{resolvedTarget}'");
+            }
+            else
+            {
+                Logger.Warning("[Subframes] Auto-session start on sequence start failed — session will start on first exposure instead.");
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.Error($"[Subframes] Auto-session start on sequence start error: {ex.Message}");
+        }
+        finally
+        {
+            Interlocked.Exchange(ref _autoSessionGuard, 0);
+        }
+    }
+
     // ── ImageSaved handler ───────────────────────────────────────────────────
 
     private void OnImageSaved(object? sender, ImageSavedEventArgs e)
@@ -251,6 +318,11 @@ public sealed class SessionService : IDisposable
                     _ = StartAutoSessionAsync(targetName, e, "first frame");
                     return;
                 }
+
+                // Session was started from sequence start without a known target —
+                // adopt the real target name from this first exposure.
+                if (string.IsNullOrEmpty(_currentTarget))
+                    _currentTarget = targetName;
 
                 // Active auto-session — check for target change.
                 var normalizedCurrent = string.IsNullOrEmpty(_currentTarget)
