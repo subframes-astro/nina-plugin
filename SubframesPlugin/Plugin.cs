@@ -28,7 +28,7 @@ file static class DoubleExtensions
 [Export(typeof(IPluginManifest))]
 [Export(typeof(SubframesPlugin))]
 [PartCreationPolicy(CreationPolicy.Shared)]
-public class SubframesPlugin : PluginBase, IPluginManifest
+public class SubframesPlugin : PluginBase, IPluginManifest, IPartImportsSatisfiedNotification
 {
     // Static primary-instance guard: NINA's MEF may create multiple instances
     // across separate CompositionContainers.  Only the first instance owns the
@@ -52,7 +52,11 @@ public class SubframesPlugin : PluginBase, IPluginManifest
     private readonly FrameCache _frameCache;
     private readonly SyncEngine _syncEngine;
     private readonly bool _isPrimary;
-    private readonly ISequenceMediator _sequenceMediator;
+
+    // Optional import: ISequenceMediator may not be available in all NINA
+    // versions or composition containers.  Subscribed in OnImportsSatisfied.
+    [Import(AllowDefault = true)]
+    public ISequenceMediator? SequenceMediator { get; set; }
 
     private CancellationTokenSource? _stationHeartbeatCts;
     private Task? _stationHeartbeatTask;
@@ -67,8 +71,7 @@ public class SubframesPlugin : PluginBase, IPluginManifest
         IFilterWheelMediator filterWheelMediator,
         IRotatorMediator rotatorMediator,
         IGuiderMediator guiderMediator,
-        IFlatDeviceMediator flatDeviceMediator,
-        ISequenceMediator sequenceMediator)
+        IFlatDeviceMediator flatDeviceMediator)
     {
         // Atomically claim the primary slot.  If another instance already
         // exists, proxy to its services and skip all background work.
@@ -84,7 +87,6 @@ public class SubframesPlugin : PluginBase, IPluginManifest
             _options = existing._options;
             _frameCache = existing._frameCache;
             _syncEngine = existing._syncEngine;
-            _sequenceMediator = sequenceMediator;
             _profileService = profileService;
             _cameraMediator = cameraMediator;
             _telescopeMediator = telescopeMediator;
@@ -107,15 +109,10 @@ public class SubframesPlugin : PluginBase, IPluginManifest
         _rotatorMediator = rotatorMediator;
         _guiderMediator = guiderMediator;
         _flatDeviceMediator = flatDeviceMediator;
-        _sequenceMediator = sequenceMediator;
         _frameCache = new FrameCache();
         _syncEngine = new SyncEngine(_frameCache, _apiClient, _options);
         _sessionService = new SessionService(imageSaveMediator, _apiClient, _options, _frameCache, _syncEngine);
         _optionsVm = new OptionsPanelViewModel(this);
-
-        // Subscribe to sequence lifecycle so we can close any open session when
-        // the user manually stops a sequence run (or it finishes without EndSessionItem).
-        _sequenceMediator.SequenceFinished += OnSequenceFinished;
 
         if (_options.IsEnabled && !string.IsNullOrWhiteSpace(_options.ApiKey))
         {
@@ -141,6 +138,19 @@ public class SubframesPlugin : PluginBase, IPluginManifest
     public PluginOptions Options => _options;
 
     /// <summary>
+    /// Called by MEF after all imports (including optional ones) are satisfied.
+    /// Subscribes to SequenceFinished if ISequenceMediator was resolved.
+    /// </summary>
+    public void OnImportsSatisfied()
+    {
+        if (_isPrimary && SequenceMediator is not null)
+        {
+            SequenceMediator.SequenceFinished += OnSequenceFinished;
+            Logger.Debug("[Subframes] Subscribed to ISequenceMediator.SequenceFinished.");
+        }
+    }
+
+    /// <summary>
     /// Called by OptionsPanelViewModel after saving settings.
     /// Starts or stops the station heartbeat loop based on the current options.
     /// </summary>
@@ -164,7 +174,8 @@ public class SubframesPlugin : PluginBase, IPluginManifest
     {
         if (_isPrimary)
         {
-            _sequenceMediator.SequenceFinished -= OnSequenceFinished;
+            if (SequenceMediator is not null)
+                SequenceMediator.SequenceFinished -= OnSequenceFinished;
             StopStationHeartbeat();
             _syncEngine.Dispose();
             _sessionService.Dispose();
