@@ -24,13 +24,13 @@ jobs:
         uses: actions/cache@v4
         with:
           path: nina-sdk
-          key: nina-sdk-3.1.2.9001-v2
+          key: nina-sdk-3.2.0.9001-v1
 
       - name: Download NINA SDK from NuGet
         if: steps.cache-nina-sdk.outputs.cache-hit != 'true'
         shell: pwsh
         run: |
-          $ninaVersion = "3.1.2.9001"
+          $ninaVersion = "3.2.0.9001"
           $packages = @(
             "nina.core",
             "nina.plugin",
