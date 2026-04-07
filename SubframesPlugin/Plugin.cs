@@ -4,6 +4,7 @@ using System.Threading.Tasks;
 using NINA.Core.Utility;
 using NINA.Equipment.Interfaces.Mediator;
 using NINA.Profile.Interfaces;
+using NINA.Sequencer.Interfaces.Mediator;
 using NINA.WPF.Base.Interfaces.Mediator;
 using NINA.Plugin;
 using NINA.Plugin.Interfaces;
@@ -51,6 +52,7 @@ public class SubframesPlugin : PluginBase, IPluginManifest
     private readonly FrameCache _frameCache;
     private readonly SyncEngine _syncEngine;
     private readonly bool _isPrimary;
+    private readonly ISequenceMediator _sequenceMediator;
 
     private CancellationTokenSource? _stationHeartbeatCts;
     private Task? _stationHeartbeatTask;
@@ -65,7 +67,8 @@ public class SubframesPlugin : PluginBase, IPluginManifest
         IFilterWheelMediator filterWheelMediator,
         IRotatorMediator rotatorMediator,
         IGuiderMediator guiderMediator,
-        IFlatDeviceMediator flatDeviceMediator)
+        IFlatDeviceMediator flatDeviceMediator,
+        ISequenceMediator sequenceMediator)
     {
         // Atomically claim the primary slot.  If another instance already
         // exists, proxy to its services and skip all background work.
@@ -81,6 +84,7 @@ public class SubframesPlugin : PluginBase, IPluginManifest
             _options = existing._options;
             _frameCache = existing._frameCache;
             _syncEngine = existing._syncEngine;
+            _sequenceMediator = sequenceMediator;
             _profileService = profileService;
             _cameraMediator = cameraMediator;
             _telescopeMediator = telescopeMediator;
@@ -103,10 +107,15 @@ public class SubframesPlugin : PluginBase, IPluginManifest
         _rotatorMediator = rotatorMediator;
         _guiderMediator = guiderMediator;
         _flatDeviceMediator = flatDeviceMediator;
+        _sequenceMediator = sequenceMediator;
         _frameCache = new FrameCache();
         _syncEngine = new SyncEngine(_frameCache, _apiClient, _options);
         _sessionService = new SessionService(imageSaveMediator, _apiClient, _options, _frameCache, _syncEngine);
         _optionsVm = new OptionsPanelViewModel(this);
+
+        // Subscribe to sequence lifecycle so we can close any open session when
+        // the user manually stops a sequence run (or it finishes without EndSessionItem).
+        _sequenceMediator.SequenceFinished += OnSequenceFinished;
 
         if (_options.IsEnabled && !string.IsNullOrWhiteSpace(_options.ApiKey))
         {
@@ -155,6 +164,7 @@ public class SubframesPlugin : PluginBase, IPluginManifest
     {
         if (_isPrimary)
         {
+            _sequenceMediator.SequenceFinished -= OnSequenceFinished;
             StopStationHeartbeat();
             _syncEngine.Dispose();
             _sessionService.Dispose();
@@ -167,6 +177,23 @@ public class SubframesPlugin : PluginBase, IPluginManifest
             Logger.Info("[Subframes] Plugin unloaded (secondary proxy instance).");
         }
         await base.Teardown();
+    }
+
+    // ── Sequence lifecycle ───────────────────────────────────────────────────
+
+    /// <summary>
+    /// Called by NINA when the advanced sequence finishes — whether it completed
+    /// normally, was cancelled by the user, or failed.  Closes any open session
+    /// so the website reflects the actual end of the imaging run.
+    /// </summary>
+    private Task OnSequenceFinished(object sender, EventArgs e)
+    {
+        if (_sessionService.HasActiveSession)
+        {
+            Logger.Info("[Subframes] Sequence run ended — closing active session.");
+            _ = _sessionService.EndSessionAsync(CancellationToken.None);
+        }
+        return Task.CompletedTask;
     }
 
     // ── Station heartbeat ────────────────────────────────────────────────────
