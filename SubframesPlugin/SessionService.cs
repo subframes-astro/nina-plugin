@@ -219,27 +219,14 @@ public sealed class SessionService : IDisposable
 
     /// <summary>
     /// Called when a <c>DeepSkyObjectContainer</c> transitions to RUNNING in the NINA sequence.
-    /// For auto-sessions, immediately transitions the current target so the heartbeat
-    /// reports the correct target name from the moment the container starts executing —
-    /// without waiting for the first image to be saved.
-    ///
-    /// No-op for manual sessions (those use the <see cref="Sequence.StartTargetItem"/> sequence item)
-    /// and when no session is active.
+    /// Immediately transitions the current target so the heartbeat reports the correct
+    /// target name from the moment the container starts executing — without waiting for
+    /// the first image to be saved.  Works for both manual and auto sessions.
     /// </summary>
     public async Task OnDSOContainerStartedAsync(string targetName, double targetRa, double targetDec)
     {
-        if (_isManualSession || _activeSessionId is null) return;
-
-        var normalizedNew = CatalogNameNormalizer.Normalize(targetName);
-        var normalizedCurrent = string.IsNullOrEmpty(_currentTarget)
-            ? string.Empty
-            : CatalogNameNormalizer.Normalize(_currentTarget);
-
-        if (string.Equals(normalizedNew, normalizedCurrent, StringComparison.OrdinalIgnoreCase))
-            return;
-
-        Logger.Info($"[Subframes] DSO container started: transitioning target '{_currentTarget ?? "none"}' → '{targetName}'");
-        await StartTargetAsync(targetName, targetRa, targetDec, ct: CancellationToken.None);
+        if (_activeSessionId is null) return;
+        await OnTargetDetectedAsync(targetName, targetRa, targetDec);
     }
 
     // ── Status transitions ───────────────────────────────────────────────────
