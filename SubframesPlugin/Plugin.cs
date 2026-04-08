@@ -503,23 +503,26 @@ public class SubframesPlugin : PluginBase, IPluginManifest, IPartImportsSatisfie
     /// Fires when any subscribed DSO container's properties change.
     /// When the container transitions to RUNNING, extracts its target and
     /// calls <see cref="SessionService.OnDSOContainerStartedAsync"/>.
+    /// Uses explicit reflection (not dynamic) to avoid DLR cross-assembly
+    /// binding failures that silently swallow property access.
     /// </summary>
     private void OnContainerPropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
         if (e.PropertyName != "Status" || sender is null) return;
         try
         {
-            dynamic container = sender;
-            if (((object)container.Status).ToString() != "RUNNING") return;
+            var type = sender.GetType();
+            var statusStr = type.GetProperty("Status")?.GetValue(sender)?.ToString();
+            if (!string.Equals(statusStr, "RUNNING", StringComparison.OrdinalIgnoreCase))
+                return;
 
-            string? name = null;
-            double ra = 0, dec = 0;
-            try { name = container.Name as string; } catch { }
-            try { ra  = (double)container.Coordinates.RA;  } catch { }
-            try { dec = (double)container.Coordinates.Dec; } catch { }
-
+            var name = type.GetProperty("Name")?.GetValue(sender) as string;
+            if (string.IsNullOrWhiteSpace(name))
+                name = ReflectNestedString(sender, type, "Target", "TargetName");
             if (string.IsNullOrWhiteSpace(name)) return;
-            if (ra == 0 && dec == 0) return; // Bug 2: vernal equinox / no valid target
+
+            var (ra, dec) = ReflectCoordinates(sender, type);
+            if (ra == 0 && dec == 0) return;
 
             var normalized = CatalogNameNormalizer.Normalize(name);
             Logger.Debug($"[Subframes] DSO container RUNNING: '{normalized}' RA={ra:F4} Dec={dec:F4}");
