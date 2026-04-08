@@ -124,7 +124,7 @@ public class SubframesPlugin : PluginBase, IPluginManifest, IPartImportsSatisfie
         _safetyMonitorMediator = safetyMonitorMediator;
         _frameCache = new FrameCache();
         _syncEngine = new SyncEngine(_frameCache, _apiClient, _options);
-        _sessionService = new SessionService(imageSaveMediator, _apiClient, _options, _frameCache, _syncEngine);
+        _sessionService = new SessionService(imageSaveMediator, _apiClient, _options, _frameCache, _syncEngine, safetyMonitorMediator);
         _optionsVm = new OptionsPanelViewModel(this);
 
         if (_options.IsEnabled && !string.IsNullOrWhiteSpace(_options.ApiKey))
@@ -649,12 +649,21 @@ public class SubframesPlugin : PluginBase, IPluginManifest, IPartImportsSatisfie
 
         var status = _sessionService.HasActiveSession ? "imaging" : "online";
 
+        bool? isSafe = null;
+        try
+        {
+            var smInfo = _safetyMonitorMediator.GetInfo();
+            if (smInfo.Connected) isSafe = smInfo.IsSafe;
+        }
+        catch { /* safety monitor not available */ }
+
         return new StationHeartbeatRequest
         {
             InstanceId    = string.IsNullOrWhiteSpace(_options.InstanceId) ? null : _options.InstanceId,
             InstanceName  = string.IsNullOrWhiteSpace(_options.InstanceName) ? null : _options.InstanceName,
             Status        = status,
             PluginVersion = Assembly.GetExecutingAssembly().GetName().Version?.ToString(),
+            IsSafe        = isSafe,
             Equipment     = equipment,
             Location      = location,
         };

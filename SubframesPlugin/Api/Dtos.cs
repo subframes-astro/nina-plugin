@@ -97,6 +97,10 @@ public sealed class HeartbeatRequest
     [JsonPropertyName("uptimeMinutes")]
     public int UptimeMinutes { get; init; }
 
+    [JsonPropertyName("isSafe")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public bool? IsSafe { get; init; }
+
     [JsonPropertyName("instanceId")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? InstanceId { get; init; }
@@ -288,6 +292,10 @@ public sealed class StationHeartbeatRequest
     [JsonPropertyName("pluginVersion")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? PluginVersion { get; init; }
+
+    [JsonPropertyName("isSafe")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public bool? IsSafe { get; init; }
 
     [JsonPropertyName("equipment")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
