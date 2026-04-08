@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using System.ComponentModel.Composition;
 using System.Reflection;
 using System.Threading.Tasks;
@@ -64,6 +65,10 @@ public class SubframesPlugin : PluginBase, IPluginManifest, IPartImportsSatisfie
     private CancellationTokenSource? _sequenceRetrySubscribeCts;
     private CancellationTokenSource? _stationHeartbeatCts;
     private Task? _stationHeartbeatTask;
+
+    // DSO container subscription tracking: subscribed during each sequence run,
+    // unsubscribed on SequenceFinished / Teardown.
+    private readonly List<(INotifyPropertyChanged Container, PropertyChangedEventHandler Handler)> _containerSubscriptions = new();
 
     [ImportingConstructor]
     public SubframesPlugin(
@@ -260,6 +265,7 @@ public class SubframesPlugin : PluginBase, IPluginManifest, IPartImportsSatisfie
                 SequenceMediator.SequenceFinished -= OnSequenceFinished;
             }
             _sessionService.ActiveTargetResolver = null;
+            UnsubscribeFromContainerEvents();
             StopStationHeartbeat();
             _syncEngine.Dispose();
             _sessionService.Dispose();
@@ -314,6 +320,11 @@ public class SubframesPlugin : PluginBase, IPluginManifest, IPartImportsSatisfie
             Logger.Debug($"[Subframes] Could not read targets from sequence: {ex.Message}");
         }
 
+        // Bug 2: RA=0/Dec=0 is the vernal equinox — not a real DSO target.
+        // Treat it as "no target known yet" so the session opens without a bogus location.
+        if (targetRa == 0 && targetDec == 0)
+            targetName = null;
+
         if (_sessionService.HasActiveSession)
         {
             // Session already active (e.g. manual StartSubframesSession ran first).
@@ -321,10 +332,12 @@ public class SubframesPlugin : PluginBase, IPluginManifest, IPartImportsSatisfie
             // updates without waiting for the first exposure to complete.
             if (!string.IsNullOrWhiteSpace(targetName))
                 _ = _sessionService.OnTargetDetectedAsync(targetName, targetRa, targetDec);
+            SubscribeToDsoContainerEvents();
             return Task.CompletedTask;
         }
 
         _ = _sessionService.OnSequenceStartedAsync(targetName, targetRa, targetDec);
+        SubscribeToDsoContainerEvents();
         return Task.CompletedTask;
     }
 
@@ -335,6 +348,7 @@ public class SubframesPlugin : PluginBase, IPluginManifest, IPartImportsSatisfie
     /// </summary>
     private Task OnSequenceFinished(object sender, EventArgs e)
     {
+        UnsubscribeFromContainerEvents();
         if (_sessionService.HasActiveSession)
         {
             Logger.Info("[Subframes] Sequence run ended — closing active session.");
@@ -440,6 +454,81 @@ public class SubframesPlugin : PluginBase, IPluginManifest, IPartImportsSatisfie
         catch { /* best effort */ }
 
         return (0, 0);
+    }
+
+    // ── DSO container event subscription ────────────────────────────────────
+
+    /// <summary>
+    /// Subscribes to PropertyChanged on all DSO containers in the current sequence so that
+    /// when a container transitions to RUNNING we can immediately update the current target
+    /// — without waiting for the first image to be saved.
+    /// </summary>
+    private void SubscribeToDsoContainerEvents()
+    {
+        UnsubscribeFromContainerEvents();
+        try
+        {
+            var getAllTargets = SequenceMediator?.GetType().GetMethod("GetAllTargets");
+            var containers = getAllTargets?.Invoke(SequenceMediator, null) as System.Collections.IList;
+            if (containers is null or { Count: 0 }) return;
+
+            foreach (var obj in containers)
+            {
+                if (obj is not INotifyPropertyChanged notifiable) continue;
+                PropertyChangedEventHandler handler = OnContainerPropertyChanged;
+                notifiable.PropertyChanged += handler;
+                _containerSubscriptions.Add((notifiable, handler));
+            }
+
+            if (_containerSubscriptions.Count > 0)
+                Logger.Debug($"[Subframes] Subscribed to PropertyChanged for {_containerSubscriptions.Count} DSO container(s).");
+        }
+        catch (Exception ex)
+        {
+            Logger.Debug($"[Subframes] SubscribeToDsoContainerEvents error: {ex.Message}");
+        }
+    }
+
+    private void UnsubscribeFromContainerEvents()
+    {
+        foreach (var (container, handler) in _containerSubscriptions)
+        {
+            try { container.PropertyChanged -= handler; }
+            catch { /* ignore — container may already be GC'd */ }
+        }
+        _containerSubscriptions.Clear();
+    }
+
+    /// <summary>
+    /// Fires when any subscribed DSO container's properties change.
+    /// When the container transitions to RUNNING, extracts its target and
+    /// calls <see cref="SessionService.OnDSOContainerStartedAsync"/>.
+    /// </summary>
+    private void OnContainerPropertyChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName != "Status" || sender is null) return;
+        try
+        {
+            dynamic container = sender;
+            if (((object)container.Status).ToString() != "RUNNING") return;
+
+            string? name = null;
+            double ra = 0, dec = 0;
+            try { name = container.Name as string; } catch { }
+            try { ra  = (double)container.Coordinates.RA;  } catch { }
+            try { dec = (double)container.Coordinates.Dec; } catch { }
+
+            if (string.IsNullOrWhiteSpace(name)) return;
+            if (ra == 0 && dec == 0) return; // Bug 2: vernal equinox / no valid target
+
+            var normalized = CatalogNameNormalizer.Normalize(name);
+            Logger.Debug($"[Subframes] DSO container RUNNING: '{normalized}' RA={ra:F4} Dec={dec:F4}");
+            _ = _sessionService.OnDSOContainerStartedAsync(normalized, ra, dec);
+        }
+        catch (Exception ex)
+        {
+            Logger.Debug($"[Subframes] OnContainerPropertyChanged error: {ex.Message}");
+        }
     }
 
     // ── Station heartbeat ────────────────────────────────────────────────────

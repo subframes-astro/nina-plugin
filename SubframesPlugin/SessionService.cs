@@ -166,6 +166,14 @@ public sealed class SessionService : IDisposable
         var sessionId = _activeSessionId;
         if (sessionId is null) return null;
 
+        // RA=0/Dec=0 is the vernal equinox — not a real DSO target.
+        // Skip the API call so the backend never receives a bogus 0,0 location.
+        if (targetRa == 0 && targetDec == 0)
+        {
+            Logger.Debug("[Subframes] StartTargetAsync skipped: RA=0/Dec=0 (no valid target coordinates).");
+            return null;
+        }
+
         var request = new StartSessionTargetRequest
         {
             SessionId  = sessionId,
@@ -207,6 +215,31 @@ public sealed class SessionService : IDisposable
         };
 
         await _apiClient.EndTargetAsync(request, ct);
+    }
+
+    /// <summary>
+    /// Called when a <c>DeepSkyObjectContainer</c> transitions to RUNNING in the NINA sequence.
+    /// For auto-sessions, immediately transitions the current target so the heartbeat
+    /// reports the correct target name from the moment the container starts executing —
+    /// without waiting for the first image to be saved.
+    ///
+    /// No-op for manual sessions (those use the <see cref="Sequence.StartTargetItem"/> sequence item)
+    /// and when no session is active.
+    /// </summary>
+    public async Task OnDSOContainerStartedAsync(string targetName, double targetRa, double targetDec)
+    {
+        if (_isManualSession || _activeSessionId is null) return;
+
+        var normalizedNew = CatalogNameNormalizer.Normalize(targetName);
+        var normalizedCurrent = string.IsNullOrEmpty(_currentTarget)
+            ? string.Empty
+            : CatalogNameNormalizer.Normalize(_currentTarget);
+
+        if (string.Equals(normalizedNew, normalizedCurrent, StringComparison.OrdinalIgnoreCase))
+            return;
+
+        Logger.Info($"[Subframes] DSO container started: transitioning target '{_currentTarget ?? "none"}' → '{targetName}'");
+        await StartTargetAsync(targetName, targetRa, targetDec, ct: CancellationToken.None);
     }
 
     // ── Status transitions ───────────────────────────────────────────────────
@@ -325,7 +358,8 @@ public sealed class SessionService : IDisposable
             // Re-check after guard: another path may have started a session.
             if (_activeSessionId is not null) return;
 
-            var hasTarget = !string.IsNullOrWhiteSpace(targetName);
+            // RA=0/Dec=0 means no valid target is known yet (vernal equinox is not a real DSO).
+            var hasTarget = !string.IsNullOrWhiteSpace(targetName) && !(targetRa == 0 && targetDec == 0);
             var resolvedTarget = hasTarget ? targetName! : string.Empty;
 
             var request = new StartSessionRequest
