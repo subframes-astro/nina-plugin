@@ -50,6 +50,7 @@ public class SubframesPlugin : PluginBase, IPluginManifest, IPartImportsSatisfie
     private readonly IRotatorMediator _rotatorMediator;
     private readonly IGuiderMediator _guiderMediator;
     private readonly IFlatDeviceMediator _flatDeviceMediator;
+    private readonly ISafetyMonitorMediator _safetyMonitorMediator;
     private readonly FrameCache _frameCache;
     private readonly SyncEngine _syncEngine;
     private readonly bool _isPrimary;
@@ -80,7 +81,8 @@ public class SubframesPlugin : PluginBase, IPluginManifest, IPartImportsSatisfie
         IFilterWheelMediator filterWheelMediator,
         IRotatorMediator rotatorMediator,
         IGuiderMediator guiderMediator,
-        IFlatDeviceMediator flatDeviceMediator)
+        IFlatDeviceMediator flatDeviceMediator,
+        ISafetyMonitorMediator safetyMonitorMediator)
     {
         // Atomically claim the primary slot.  If another instance already
         // exists, proxy to its services and skip all background work.
@@ -104,6 +106,7 @@ public class SubframesPlugin : PluginBase, IPluginManifest, IPartImportsSatisfie
             _rotatorMediator = rotatorMediator;
             _guiderMediator = guiderMediator;
             _flatDeviceMediator = flatDeviceMediator;
+            _safetyMonitorMediator = safetyMonitorMediator;
             return;
         }
 
@@ -118,6 +121,7 @@ public class SubframesPlugin : PluginBase, IPluginManifest, IPartImportsSatisfie
         _rotatorMediator = rotatorMediator;
         _guiderMediator = guiderMediator;
         _flatDeviceMediator = flatDeviceMediator;
+        _safetyMonitorMediator = safetyMonitorMediator;
         _frameCache = new FrameCache();
         _syncEngine = new SyncEngine(_frameCache, _apiClient, _options);
         _sessionService = new SessionService(imageSaveMediator, _apiClient, _options, _frameCache, _syncEngine);
@@ -673,6 +677,7 @@ public class SubframesPlugin : PluginBase, IPluginManifest, IPartImportsSatisfie
         try { var i = _rotatorMediator.GetInfo();     Add("Rotator",     i.Name, i.Connected); } catch { /* device not available */ }
         try { var i = _guiderMediator.GetInfo();      Add("Guider",      i.Name, i.Connected); } catch { /* device not available */ }
         try { var i = _flatDeviceMediator.GetInfo();  Add("FlatPanel",   i.Name, i.Connected); } catch { /* device not available */ }
+        try { var i = _safetyMonitorMediator.GetInfo(); Add("SafetyMonitor", i.Name, i.Connected); } catch { /* device not available */ }
 
         return devices;
     }
