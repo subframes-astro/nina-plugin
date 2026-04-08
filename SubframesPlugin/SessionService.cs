@@ -3,6 +3,7 @@ using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using NINA.Core.Model;
 using NINA.Core.Utility;
+using NINA.Equipment.Interfaces.Mediator;
 using NINA.WPF.Base.Interfaces.Mediator;
 using Subframes.NinaPlugin.Api;
 using Subframes.NinaPlugin.Data;
@@ -28,6 +29,7 @@ public sealed class SessionService : IDisposable
     private readonly PluginOptions _options;
     private readonly FrameCache _frameCache;
     private readonly SyncEngine _syncEngine;
+    private readonly ISafetyMonitorMediator? _safetyMonitorMediator;
 
     private volatile string? _activeSessionId;
     private volatile string? _activeSessionTargetId;
@@ -54,18 +56,31 @@ public sealed class SessionService : IDisposable
     /// <summary>Replace non-finite doubles (NaN, ±Infinity) with null so JSON serialization never throws.</summary>
     private static double? Finite(double? v) => v is double d && double.IsFinite(d) ? v : null;
 
+    /// <summary>Returns the safety monitor's IsSafe value when connected, or null if unavailable.</summary>
+    private bool? ReadIsSafe()
+    {
+        try
+        {
+            var info = _safetyMonitorMediator?.GetInfo();
+            return info is { Connected: true } ? info.IsSafe : null;
+        }
+        catch { return null; }
+    }
+
     public SessionService(
         IImageSaveMediator imageSaveMediator,
         SubframesClient apiClient,
         PluginOptions options,
         FrameCache frameCache,
-        SyncEngine syncEngine)
+        SyncEngine syncEngine,
+        ISafetyMonitorMediator? safetyMonitorMediator = null)
     {
         _imageSaveMediator = imageSaveMediator;
         _apiClient = apiClient;
         _options = options;
         _frameCache = frameCache;
         _syncEngine = syncEngine;
+        _safetyMonitorMediator = safetyMonitorMediator;
 
         // Subscribe once; the handler fires for every saved image while NINA runs.
         _imageSaveMediator.ImageSaved += OnImageSaved;
@@ -321,6 +336,7 @@ public sealed class SessionService : IDisposable
             LatestHfr      = snap.LatestHfr,
             LatestRmsTotal = snap.LatestRmsTotal,
             UptimeMinutes  = (int)(DateTime.UtcNow - _sessionStartTime).TotalMinutes,
+            IsSafe         = ReadIsSafe(),
             InstanceId     = string.IsNullOrWhiteSpace(_options.InstanceId) ? null : _options.InstanceId,
             InstanceName   = string.IsNullOrWhiteSpace(_options.InstanceName) ? null : _options.InstanceName,
         };
@@ -697,6 +713,7 @@ public sealed class SessionService : IDisposable
                     LatestHfr      = snap.LatestHfr,
                     LatestRmsTotal = snap.LatestRmsTotal,
                     UptimeMinutes  = (int)(DateTime.UtcNow - _sessionStartTime).TotalMinutes,
+                    IsSafe         = ReadIsSafe(),
                     InstanceId     = string.IsNullOrWhiteSpace(_options.InstanceId) ? null : _options.InstanceId,
                     InstanceName   = string.IsNullOrWhiteSpace(_options.InstanceName) ? null : _options.InstanceName,
                 };
