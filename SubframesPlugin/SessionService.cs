@@ -105,7 +105,14 @@ public sealed class SessionService : IDisposable
             if (_options.IsDebugEnabled)
                 Logger.Info($"[Subframes] Session start confirmed: sessionId={sessionId} target='{request.TargetName}'");
             _isManualSession = true;
-            _currentTarget = request.TargetName;
+            // Store null when target name is empty or "Unknown Target" so
+            // OnTargetDetectedAsync will adopt the real target from the first
+            // DSO container start or image save — instead of displaying a
+            // bogus "Unknown Target" in heartbeats until then.
+            _currentTarget = string.IsNullOrEmpty(request.TargetName)
+                || string.Equals(request.TargetName, "Unknown Target", StringComparison.OrdinalIgnoreCase)
+                    ? null
+                    : request.TargetName;
             _activeSessionTargetId = null;
             _sessionStatus = "active";
             _snapshot = new HeartbeatSnapshot(null, null, null);
