@@ -500,11 +500,11 @@ public sealed class SessionService : IDisposable
             try
             {
                 var guiderInfo = _guiderMediator?.GetInfo();
-                if (guiderInfo is { Connected: true } && guiderInfo.RMSError.Total > 0)
+                if (guiderInfo is { Connected: true } && guiderInfo.RMSError.Total.Arcseconds > 0)
                 {
-                    rmsRa    = Finite(guiderInfo.RMSError.RA);
-                    rmsDec   = Finite(guiderInfo.RMSError.Dec);
-                    rmsTotal = Finite(guiderInfo.RMSError.Total);
+                    rmsRa    = Finite(guiderInfo.RMSError.RA.Arcseconds);
+                    rmsDec   = Finite(guiderInfo.RMSError.Dec.Arcseconds);
+                    rmsTotal = Finite(guiderInfo.RMSError.Total.Arcseconds);
                 }
             }
             catch { /* guider not available — leave null */ }
