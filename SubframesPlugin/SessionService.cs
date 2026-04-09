@@ -30,6 +30,8 @@ public sealed class SessionService : IDisposable
     private readonly FrameCache _frameCache;
     private readonly SyncEngine _syncEngine;
     private readonly ISafetyMonitorMediator? _safetyMonitorMediator;
+    private readonly IGuiderMediator? _guiderMediator;
+    private readonly IWeatherDataMediator? _weatherDataMediator;
 
     private volatile string? _activeSessionId;
     private volatile string? _activeSessionTargetId;
@@ -73,7 +75,9 @@ public sealed class SessionService : IDisposable
         PluginOptions options,
         FrameCache frameCache,
         SyncEngine syncEngine,
-        ISafetyMonitorMediator? safetyMonitorMediator = null)
+        ISafetyMonitorMediator? safetyMonitorMediator = null,
+        IGuiderMediator? guiderMediator = null,
+        IWeatherDataMediator? weatherDataMediator = null)
     {
         _imageSaveMediator = imageSaveMediator;
         _apiClient = apiClient;
@@ -81,6 +85,8 @@ public sealed class SessionService : IDisposable
         _frameCache = frameCache;
         _syncEngine = syncEngine;
         _safetyMonitorMediator = safetyMonitorMediator;
+        _guiderMediator = guiderMediator;
+        _weatherDataMediator = weatherDataMediator;
 
         // Subscribe once; the handler fires for every saved image while NINA runs.
         _imageSaveMediator.ImageSaved += OnImageSaved;
@@ -489,9 +495,39 @@ public sealed class SessionService : IDisposable
             var filter = meta.FilterWheel?.Filter;
             var hfr = e.StarDetectionAnalysis?.HFR;
 
+            // Read guiding RMS (in-memory snapshot — no I/O, no blocking).
+            double? rmsRa = null, rmsDec = null, rmsTotal = null;
+            try
+            {
+                var guiderInfo = _guiderMediator?.GetInfo();
+                if (guiderInfo is { Connected: true } && guiderInfo.RMSError.Total > 0)
+                {
+                    rmsRa    = Finite(guiderInfo.RMSError.RA);
+                    rmsDec   = Finite(guiderInfo.RMSError.Dec);
+                    rmsTotal = Finite(guiderInfo.RMSError.Total);
+                }
+            }
+            catch { /* guider not available — leave null */ }
+
+            // Read weather conditions (in-memory snapshot — no I/O, no blocking).
+            double? ambientTemp = null, humidity = null, dewPoint = null, windSpeed = null, cloudCover = null, skyQuality = null;
+            try
+            {
+                var weatherInfo = _weatherDataMediator?.GetInfo();
+                if (weatherInfo is { Connected: true })
+                {
+                    ambientTemp = Finite(weatherInfo.Temperature);
+                    humidity    = Finite(weatherInfo.Humidity);
+                    dewPoint    = Finite(weatherInfo.DewPoint);
+                    windSpeed   = Finite(weatherInfo.WindSpeed);
+                    cloudCover  = Finite(weatherInfo.CloudCover);
+                    skyQuality  = Finite(weatherInfo.SkyQuality);
+                }
+            }
+            catch { /* weather device not available — leave null */ }
+
             // Update heartbeat snapshot atomically so the timer always reads consistent state.
-            // RMS guiding data is not available from ImageSavedEventArgs; left null for now.
-            _snapshot = new HeartbeatSnapshot(filter, Finite(hfr), null);
+            _snapshot = new HeartbeatSnapshot(filter, Finite(hfr), rmsTotal);
 
             // If the session was in a waiting/paused state, a new exposure means we're active again.
             // Fire-and-forget the status transition; don't block the imaging path.
@@ -517,6 +553,15 @@ public sealed class SessionService : IDisposable
                 HfrStdev        = Finite(e.StarDetectionAnalysis?.HFRStDev),
                 StarCount       = e.StarDetectionAnalysis?.DetectedStars,
                 CameraTemp      = Finite(meta.Camera?.Temperature),
+                RmsRa           = rmsRa,
+                RmsDec          = rmsDec,
+                RmsTotal        = rmsTotal,
+                AmbientTemp     = ambientTemp,
+                Humidity        = humidity,
+                DewPoint        = dewPoint,
+                WindSpeed       = windSpeed,
+                CloudCover      = cloudCover,
+                SkyQuality      = skyQuality,
             };
 
             // Write to local SQLite cache — never blocks, never throws.
