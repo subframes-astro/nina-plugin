@@ -51,6 +51,7 @@ public class SubframesPlugin : PluginBase, IPluginManifest, IPartImportsSatisfie
     private readonly IGuiderMediator _guiderMediator;
     private readonly IFlatDeviceMediator _flatDeviceMediator;
     private readonly ISafetyMonitorMediator _safetyMonitorMediator;
+    private readonly IWeatherDataMediator _weatherDataMediator;
     private readonly FrameCache _frameCache;
     private readonly SyncEngine _syncEngine;
     private readonly bool _isPrimary;
@@ -82,7 +83,8 @@ public class SubframesPlugin : PluginBase, IPluginManifest, IPartImportsSatisfie
         IRotatorMediator rotatorMediator,
         IGuiderMediator guiderMediator,
         IFlatDeviceMediator flatDeviceMediator,
-        ISafetyMonitorMediator safetyMonitorMediator)
+        ISafetyMonitorMediator safetyMonitorMediator,
+        IWeatherDataMediator weatherDataMediator)
     {
         // Atomically claim the primary slot.  If another instance already
         // exists, proxy to its services and skip all background work.
@@ -107,6 +109,7 @@ public class SubframesPlugin : PluginBase, IPluginManifest, IPartImportsSatisfie
             _guiderMediator = guiderMediator;
             _flatDeviceMediator = flatDeviceMediator;
             _safetyMonitorMediator = safetyMonitorMediator;
+            _weatherDataMediator = weatherDataMediator;
             return;
         }
 
@@ -122,9 +125,10 @@ public class SubframesPlugin : PluginBase, IPluginManifest, IPartImportsSatisfie
         _guiderMediator = guiderMediator;
         _flatDeviceMediator = flatDeviceMediator;
         _safetyMonitorMediator = safetyMonitorMediator;
+        _weatherDataMediator = weatherDataMediator;
         _frameCache = new FrameCache();
         _syncEngine = new SyncEngine(_frameCache, _apiClient, _options);
-        _sessionService = new SessionService(imageSaveMediator, _apiClient, _options, _frameCache, _syncEngine, safetyMonitorMediator);
+        _sessionService = new SessionService(imageSaveMediator, _apiClient, _options, _frameCache, _syncEngine, safetyMonitorMediator, guiderMediator, weatherDataMediator);
         _optionsVm = new OptionsPanelViewModel(this);
 
         if (_options.IsEnabled && !string.IsNullOrWhiteSpace(_options.ApiKey))
