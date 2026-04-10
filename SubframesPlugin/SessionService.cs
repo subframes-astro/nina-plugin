@@ -566,6 +566,8 @@ public sealed class SessionService : IDisposable
                 Hfr             = Finite(hfr),
                 HfrStdev        = Finite(e.StarDetectionAnalysis?.HFRStDev),
                 StarCount       = e.StarDetectionAnalysis?.DetectedStars,
+                Fwhm            = Finite(e.StarDetectionAnalysis?.FWHM),
+                Eccentricity    = Finite(e.StarDetectionAnalysis?.Eccentricity),
                 CameraTemp      = Finite(meta.Camera?.Temperature),
                 RmsRa           = rmsRa,
                 RmsDec          = rmsDec,
