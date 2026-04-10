@@ -2,6 +2,7 @@ using System.ComponentModel.Composition;
 using CommunityToolkit.Mvvm.ComponentModel;
 using NINA.Core.Model;
 using NINA.Core.Utility;
+using NINA.Equipment.Interfaces.Mediator;
 using NINA.Profile.Interfaces;
 using NINA.Sequencer.Container;
 using NINA.Sequencer.SequenceItem;
@@ -33,6 +34,7 @@ public partial class StartSessionItem : SequenceItem, IValidatable
 {
     private readonly SessionService _sessionService;
     private readonly IProfileService _profileService;
+    private readonly ICameraMediator _cameraMediator;
 
     [ObservableProperty]
     private string _targetName = "Unknown Target";
@@ -44,10 +46,11 @@ public partial class StartSessionItem : SequenceItem, IValidatable
     private double _targetDec;
 
     [ImportingConstructor]
-    public StartSessionItem(SubframesPlugin plugin, IProfileService profileService)
+    public StartSessionItem(SubframesPlugin plugin, IProfileService profileService, ICameraMediator cameraMediator)
     {
         _sessionService = plugin.SessionService;
         _profileService = profileService;
+        _cameraMediator = cameraMediator;
     }
 
     // Copy constructor for Clone().
@@ -55,6 +58,7 @@ public partial class StartSessionItem : SequenceItem, IValidatable
     {
         _sessionService = other._sessionService;
         _profileService = other._profileService;
+        _cameraMediator = other._cameraMediator;
         _targetName = other._targetName;
         _targetRa = other._targetRa;
         _targetDec = other._targetDec;
@@ -107,17 +111,51 @@ public partial class StartSessionItem : SequenceItem, IValidatable
         var lon = _profileService.ActiveProfile.AstrometrySettings.Longitude;
         var hasLocation = !(lat == 0.0 && lon == 0.0);
 
+        // Read camera hardware snapshot — gracefully null if camera is disconnected.
+        double? pixelSizeMicrons = null;
+        int? sensorWidthPx = null;
+        int? sensorHeightPx = null;
+        try
+        {
+            var camInfo = _cameraMediator.GetInfo();
+            if (camInfo is { Connected: true })
+            {
+                pixelSizeMicrons = camInfo.PixelSize > 0 ? camInfo.PixelSize : null;
+                sensorWidthPx    = camInfo.CameraXSize > 0 ? camInfo.CameraXSize : null;
+                sensorHeightPx   = camInfo.CameraYSize > 0 ? camInfo.CameraYSize : null;
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.Warning($"[Subframes] Could not read camera info for session start: {ex.Message}");
+        }
+
+        double? focalLengthMm = null;
+        try
+        {
+            var fl = _profileService.ActiveProfile?.TelescopeSettings?.FocalLength;
+            focalLengthMm = fl is > 0 ? fl : null;
+        }
+        catch (Exception ex)
+        {
+            Logger.Warning($"[Subframes] Could not read focal length for session start: {ex.Message}");
+        }
+
         var request = new StartSessionRequest
         {
-            TargetName    = targetName,
-            TargetRa      = resolvedRa,
-            TargetDec     = resolvedDec,
-            StartTime     = DateTime.UtcNow.ToString("o"),
-            InstanceId    = string.IsNullOrWhiteSpace(options.InstanceId) ? null : options.InstanceId,
-            InstanceName  = string.IsNullOrWhiteSpace(options.InstanceName) ? null : options.InstanceName,
-            LocationLat   = hasLocation ? lat : null,
-            LocationLon   = hasLocation ? lon : null,
-            LocationLabel = hasLocation ? _profileService.ActiveProfile.Name : null,
+            TargetName       = targetName,
+            TargetRa         = resolvedRa,
+            TargetDec        = resolvedDec,
+            StartTime        = DateTime.UtcNow.ToString("o"),
+            InstanceId       = string.IsNullOrWhiteSpace(options.InstanceId) ? null : options.InstanceId,
+            InstanceName     = string.IsNullOrWhiteSpace(options.InstanceName) ? null : options.InstanceName,
+            LocationLat      = hasLocation ? lat : null,
+            LocationLon      = hasLocation ? lon : null,
+            LocationLabel    = hasLocation ? _profileService.ActiveProfile.Name : null,
+            PixelSizeMicrons = pixelSizeMicrons,
+            SensorWidthPx    = sensorWidthPx,
+            SensorHeightPx   = sensorHeightPx,
+            FocalLengthMm    = focalLengthMm,
         };
 
         var sessionId = await _sessionService.StartSessionAsync(request, ct);

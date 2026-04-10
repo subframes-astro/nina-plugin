@@ -50,6 +50,22 @@ public sealed class StartSessionRequest
     [JsonPropertyName("instanceName")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? InstanceName { get; init; }
+
+    [JsonPropertyName("pixelSizeMicrons")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public double? PixelSizeMicrons { get; init; }
+
+    [JsonPropertyName("sensorWidthPx")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public int? SensorWidthPx { get; init; }
+
+    [JsonPropertyName("sensorHeightPx")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public int? SensorHeightPx { get; init; }
+
+    [JsonPropertyName("focalLengthMm")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public double? FocalLengthMm { get; init; }
 }
 
 /// <summary>Body for POST /api/v1/ingest/session/end</summary>
