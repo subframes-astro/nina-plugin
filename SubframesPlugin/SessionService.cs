@@ -4,6 +4,7 @@ using System.Windows.Media.Imaging;
 using NINA.Core.Model;
 using NINA.Core.Utility;
 using NINA.Core.Model.Equipment;
+using NINA.Equipment.Model;
 using NINA.Equipment.Interfaces.Mediator;
 using NINA.WPF.Base.Interfaces.Mediator;
 using Subframes.NinaPlugin.Api;
