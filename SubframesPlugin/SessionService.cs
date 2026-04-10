@@ -566,8 +566,13 @@ public sealed class SessionService : IDisposable
                 Hfr             = Finite(hfr),
                 HfrStdev        = Finite(e.StarDetectionAnalysis?.HFRStDev),
                 StarCount       = e.StarDetectionAnalysis?.DetectedStars,
-                Fwhm            = Finite(e.StarDetectionAnalysis?.FWHM),
-                Eccentricity    = Finite(e.StarDetectionAnalysis?.Eccentricity),
+                Fwhm            = Finite(e.StarDetectionAnalysis?.StarFWHM),
+                // NOTE: IStarDetectionAnalysis does NOT have an Eccentricity property in NINA 3.2.0.9001.
+                // Verified by inspecting all NINA NuGet DLLs (nina.image, nina.wpf.base, nina.equipment, nina.core).
+                // The only eccentricity reference is CalculateEccentricity in Accord.Math.Geometry (a static helper).
+                // StarFWHM IS the correct property (confirmed: get_StarFWHM exists; get_FWHM does NOT).
+                // Eccentricity remains null until NINA exposes it or we compute it from StarList per-star data.
+                Eccentricity    = null,
                 CameraTemp      = Finite(meta.Camera?.Temperature),
                 RmsRa           = rmsRa,
                 RmsDec          = rmsDec,
