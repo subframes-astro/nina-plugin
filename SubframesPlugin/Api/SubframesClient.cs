@@ -641,5 +641,51 @@ public sealed class SubframesClient : IDisposable
         }
     }
 
+    // ── Session Event ────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Post a discrete session event (e.g. autofocus completion, meridian flip).
+    /// Fire-and-forget from the caller's perspective — uses a 5-second timeout,
+    /// no retry. Failures are logged and swallowed so event losses never interrupt
+    /// imaging.
+    /// </summary>
+    public async Task PostEventAsync(
+        EventRequest request,
+        CancellationToken ct = default)
+    {
+        if (!_options.IsEnabled) return;
+
+        using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        cts.CancelAfter(TimeSpan.FromSeconds(5));
+
+        try
+        {
+            SetAuthHeader();
+            var url = $"{BaseUrl}/api/v1/ingest/event";
+            var jsonBytes = SerializeJson(request);
+            if (_options.IsDebugEnabled)
+                Logger.Info($"[Subframes] POST {url} body={System.Text.Encoding.UTF8.GetString(jsonBytes)}");
+
+            using var response = await _http.PostAsync(url, CreateJsonContent(jsonBytes), cts.Token);
+
+            if (!response.IsSuccessStatusCode)
+            {
+                var body = await response.Content.ReadAsStringAsync(cts.Token);
+                Logger.Warning($"[Subframes] PostEvent HTTP {(int)response.StatusCode}: {body}");
+                return;
+            }
+
+            Logger.Debug($"[Subframes] Event posted: type={request.EventType} session={request.SessionId}");
+        }
+        catch (OperationCanceledException)
+        {
+            Logger.Warning($"[Subframes] PostEvent timed out (type={request.EventType} session={request.SessionId})");
+        }
+        catch (Exception ex)
+        {
+            Logger.Warning($"[Subframes] PostEvent failed (type={request.EventType}): {ex.Message}");
+        }
+    }
+
     public void Dispose() => _http.Dispose();
 }
