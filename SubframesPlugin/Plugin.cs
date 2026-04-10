@@ -3,6 +3,7 @@ using System.ComponentModel.Composition;
 using System.Reflection;
 using System.Threading.Tasks;
 using NINA.Core.Utility;
+using NINA.Equipment.Equipment.MyFocuser;
 using NINA.Equipment.Interfaces.Mediator;
 using NINA.Profile.Interfaces;
 using NINA.Sequencer.Interfaces.Mediator;
@@ -29,7 +30,7 @@ file static class DoubleExtensions
 [Export(typeof(IPluginManifest))]
 [Export(typeof(SubframesPlugin))]
 [PartCreationPolicy(CreationPolicy.Shared)]
-public class SubframesPlugin : PluginBase, IPluginManifest, IPartImportsSatisfiedNotification
+public class SubframesPlugin : PluginBase, IPluginManifest, IPartImportsSatisfiedNotification, IFocuserConsumer
 {
     // Static primary-instance guard: NINA's MEF may create multiple instances
     // across separate CompositionContainers.  Only the first instance owns the
@@ -136,6 +137,10 @@ public class SubframesPlugin : PluginBase, IPluginManifest, IPartImportsSatisfie
             StartStationHeartbeat();
             _syncEngine.Start();
         }
+
+        // Register for autofocus completion callbacks and meridian flip events.
+        _focuserMediator.RegisterConsumer(this);
+        _telescopeMediator.AfterMeridianFlip += OnAfterMeridianFlipAsync;
 
         var pending = _frameCache.GetPendingCount();
         if (pending > 0)
@@ -259,6 +264,8 @@ public class SubframesPlugin : PluginBase, IPluginManifest, IPartImportsSatisfie
     {
         if (_isPrimary)
         {
+            _focuserMediator.RemoveConsumer(this);
+            _telescopeMediator.AfterMeridianFlip -= OnAfterMeridianFlipAsync;
             _sequenceRetrySubscribeCts?.Cancel();
             _sequenceRetrySubscribeCts?.Dispose();
             _sequenceRetrySubscribeCts = null;
@@ -693,5 +700,74 @@ public class SubframesPlugin : PluginBase, IPluginManifest, IPartImportsSatisfie
         try { var i = _safetyMonitorMediator.GetInfo(); Add("SafetyMonitor", i.Name, i.Connected); } catch { /* device not available */ }
 
         return devices;
+    }
+
+    // ── IFocuserConsumer ─────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Called by NINA's focuser mediator when an autofocus run completes successfully.
+    /// Posts a fire-and-forget event to the Subframes API.
+    /// </summary>
+    public void UpdateEndAutoFocusRun(AutoFocusInfo info)
+    {
+        if (!_isPrimary) return;
+
+        var sessionId = _sessionService.ActiveSessionId;
+        if (sessionId is null) return;
+
+        // Build metadata: use what AutoFocusInfo provides. Attempt reflection for
+        // HFR fields that may exist in newer NINA builds but aren't in the 3.1.2 SDK.
+        double? hfrBefore = null;
+        double? hfrAfter  = null;
+        bool?   succeeded = null;
+        double? duration  = null;
+
+        try
+        {
+            var t = info.GetType();
+            hfrBefore = t.GetProperty("InitialHFR")?.GetValue(info) as double?;
+            hfrAfter  = t.GetProperty("CalculatedHFR")?.GetValue(info) as double?;
+            succeeded = t.GetProperty("Succeeded")?.GetValue(info) as bool?;
+            var dur   = t.GetProperty("Duration")?.GetValue(info);
+            if (dur is TimeSpan ts) duration = ts.TotalSeconds;
+            else if (dur is double d) duration = d;
+        }
+        catch { /* reflection best-effort */ }
+
+        var metadata = new
+        {
+            success     = succeeded ?? true,
+            hfrBefore   = DoubleExtensions.Finite(hfrBefore),
+            hfrAfter    = DoubleExtensions.Finite(hfrAfter),
+            temperature = DoubleExtensions.Finite(info.Temperature),
+            position    = (int?)info.Position,
+            duration    = DoubleExtensions.Finite(duration),
+        };
+
+        _ = Task.Run(() => _apiClient.PostEventAsync(sessionId, "autofocus", metadata));
+    }
+
+    // No-op stubs required by IFocuserConsumer / IDeviceConsumer<FocuserInfo>.
+    public void UpdateDeviceInfo(FocuserInfo deviceInfo) { }
+    public void UpdateUserFocused(FocuserInfo info) { }
+    public void Dispose() { }
+
+    // ── Meridian flip event ──────────────────────────────────────────────────
+
+    /// <summary>
+    /// Called by NINA's telescope mediator after a meridian flip completes.
+    /// Posts a fire-and-forget event to the Subframes API.
+    /// </summary>
+    private Task OnAfterMeridianFlipAsync(object sender, AfterMeridianFlipEventArgs e)
+    {
+        if (!_isPrimary) return Task.CompletedTask;
+
+        var sessionId = _sessionService.ActiveSessionId;
+        if (sessionId is null) return Task.CompletedTask;
+
+        var metadata = new { success = e.Success };
+        _ = Task.Run(() => _apiClient.PostEventAsync(sessionId, "meridian_flip", metadata));
+
+        return Task.CompletedTask;
     }
 }

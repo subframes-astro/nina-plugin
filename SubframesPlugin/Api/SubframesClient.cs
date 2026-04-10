@@ -501,6 +501,61 @@ public sealed class SubframesClient : IDisposable
         }
     }
 
+    // ── Session Event ────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Fire-and-forget session event (autofocus, meridian flip, etc.).
+    /// Uses a dedicated 5-second timeout. Not retried — event delivery is best-effort.
+    /// 404 → no-op (older API). All exceptions are caught and logged.
+    /// </summary>
+    public async Task PostEventAsync(
+        string sessionId,
+        string eventType,
+        object? metadata,
+        CancellationToken ct = default)
+    {
+        if (!_options.IsEnabled) return;
+
+        using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        cts.CancelAfter(TimeSpan.FromSeconds(5));
+
+        try
+        {
+            SetAuthHeader();
+            var url = $"{BaseUrl}/api/v1/ingest/event";
+            var body = new EventInput
+            {
+                SessionId = sessionId,
+                EventType = eventType,
+                Timestamp = DateTime.UtcNow.ToString("o"),
+                Metadata = metadata
+            };
+            if (_options.IsDebugEnabled)
+                Logger.Info($"[Subframes] POST {url} eventType={eventType}");
+
+            using var response = await _http.PostAsJsonAsync(url, body, JsonOptions, cts.Token);
+
+            if (response.StatusCode == System.Net.HttpStatusCode.NotFound)
+            {
+                Logger.Debug("[Subframes] event endpoint not found — skipping");
+                return;
+            }
+
+            if (!response.IsSuccessStatusCode)
+                Logger.Warning($"[Subframes] PostEvent HTTP {(int)response.StatusCode} (type={eventType})");
+            else
+                Logger.Debug($"[Subframes] Event posted: {eventType} for session {sessionId}");
+        }
+        catch (OperationCanceledException)
+        {
+            Logger.Warning($"[Subframes] PostEvent timed out (type={eventType})");
+        }
+        catch (Exception ex)
+        {
+            Logger.Warning($"[Subframes] PostEvent failed (type={eventType}): {ex.Message}");
+        }
+    }
+
     // ── Thumbnail Upload ─────────────────────────────────────────────────────
 
     /// <summary>

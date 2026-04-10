@@ -275,6 +275,23 @@ public sealed class FrameInput
     public double? SkyQuality { get; init; }
 }
 
+/// <summary>Body for POST /api/v1/ingest/event</summary>
+public sealed class EventInput
+{
+    [JsonPropertyName("sessionId")]
+    public string SessionId { get; init; } = "";
+
+    [JsonPropertyName("eventType")]
+    public string EventType { get; init; } = "";
+
+    [JsonPropertyName("timestamp")]
+    public string Timestamp { get; init; } = "";
+
+    [JsonPropertyName("metadata")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public object? Metadata { get; init; }
+}
+
 /// <summary>Body for POST /api/v1/ingest/station/heartbeat</summary>
 public sealed class StationHeartbeatRequest
 {
