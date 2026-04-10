@@ -612,7 +612,16 @@ public class SubframesPlugin : PluginBase, IPluginManifest, IPartImportsSatisfie
             // in NINA SDK 3.1.2+.  Fall back to the mediators' GetInfo() which report
             // the connected device name at runtime.
             string? cameraName = null;
-            try { cameraName = _cameraMediator.GetInfo().Name; } catch { }
+            int? sensorWidth = null;
+            int? sensorHeight = null;
+            try
+            {
+                var camInfo = _cameraMediator.GetInfo();
+                cameraName = camInfo.Name;
+                if (camInfo.Connected && camInfo.XSize > 0) sensorWidth = camInfo.XSize;
+                if (camInfo.Connected && camInfo.YSize > 0) sensorHeight = camInfo.YSize;
+            }
+            catch { }
 
             string? filterWheelName = null;
             try { filterWheelName = _filterWheelMediator.GetInfo().Name; } catch { }
@@ -623,6 +632,8 @@ public class SubframesPlugin : PluginBase, IPluginManifest, IPartImportsSatisfie
                 FocalLength   = DoubleExtensions.Finite(ts?.FocalLength),
                 Aperture      = DoubleExtensions.Finite(apertureDiameter),
                 CameraName    = cameraName,
+                SensorWidth   = sensorWidth,
+                SensorHeight  = sensorHeight,
                 PixelSize     = DoubleExtensions.Finite(cs?.PixelSize),
                 MountName     = ts?.Name,
                 FilterWheel   = filterWheelName,

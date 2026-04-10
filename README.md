@@ -301,6 +301,8 @@ Request: {
     "focalLength": 2032.0,
     "aperture": 203.2,
     "cameraName": "ZWO ASI2600MM Pro",
+    "sensorWidth": 6248,
+    "sensorHeight": 4176,
     "pixelSize": 3.76,
     "mountName": "iOptron CEM60",
     "filterWheel": "ZWO EFW 7x36",
