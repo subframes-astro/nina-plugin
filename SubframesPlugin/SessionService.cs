@@ -3,6 +3,7 @@ using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using NINA.Core.Model;
 using NINA.Core.Utility;
+using NINA.Core.Model.Equipment;
 using NINA.Equipment.Interfaces.Mediator;
 using NINA.WPF.Base.Interfaces.Mediator;
 using Subframes.NinaPlugin.Api;
@@ -22,7 +23,7 @@ namespace Subframes.NinaPlugin;
 /// Thread safety: the active session ID is stored in a volatile field; the
 /// event handler fires on NINA's internal thread pool so we must not block.
 /// </summary>
-public sealed class SessionService : IDisposable
+public sealed class SessionService : IDisposable, IFocuserConsumer
 {
     private readonly IImageSaveMediator _imageSaveMediator;
     private readonly SubframesClient _apiClient;
@@ -33,6 +34,8 @@ public sealed class SessionService : IDisposable
     private readonly IGuiderMediator? _guiderMediator;
     private readonly IWeatherDataMediator? _weatherDataMediator;
     private readonly IRotatorMediator? _rotatorMediator;
+    private readonly ITelescopeMediator? _telescopeMediator;
+    private readonly IFocuserMediator? _focuserMediator;
 
     private volatile string? _activeSessionId;
     private volatile string? _activeSessionTargetId;
@@ -79,7 +82,9 @@ public sealed class SessionService : IDisposable
         ISafetyMonitorMediator? safetyMonitorMediator = null,
         IGuiderMediator? guiderMediator = null,
         IWeatherDataMediator? weatherDataMediator = null,
-        IRotatorMediator? rotatorMediator = null)
+        IRotatorMediator? rotatorMediator = null,
+        ITelescopeMediator? telescopeMediator = null,
+        IFocuserMediator? focuserMediator = null)
     {
         _imageSaveMediator = imageSaveMediator;
         _apiClient = apiClient;
@@ -90,6 +95,8 @@ public sealed class SessionService : IDisposable
         _guiderMediator = guiderMediator;
         _weatherDataMediator = weatherDataMediator;
         _rotatorMediator = rotatorMediator;
+        _telescopeMediator = telescopeMediator;
+        _focuserMediator = focuserMediator;
 
         // Subscribe once; the handler fires for every saved image while NINA runs.
         _imageSaveMediator.ImageSaved += OnImageSaved;
@@ -142,6 +149,7 @@ public sealed class SessionService : IDisposable
             _snapshot = new HeartbeatSnapshot(null, null, null);
             _sessionStartTime = DateTime.UtcNow;
             StartHeartbeatTimer(sessionId);
+            RegisterSessionEventConsumers();
         }
         else
         {
@@ -165,6 +173,7 @@ public sealed class SessionService : IDisposable
         catch (Exception ex) { Logger.Warning($"[Subframes] Pre-end flush failed: {ex.Message}"); }
 
         StopHeartbeatTimer();
+        UnregisterSessionEventConsumers();
         _activeSessionId = null;
         _activeSessionTargetId = null;
         _sessionStatus = "active";
@@ -176,6 +185,7 @@ public sealed class SessionService : IDisposable
     public void ClearSession()
     {
         StopHeartbeatTimer();
+        UnregisterSessionEventConsumers();
         _activeSessionId = null;
         Logger.Info("[Subframes] Session cleared.");
     }
@@ -405,6 +415,7 @@ public sealed class SessionService : IDisposable
                 _snapshot = new HeartbeatSnapshot(null, null, null);
                 _sessionStartTime = DateTime.UtcNow;
                 StartHeartbeatTimer(sessionId);
+                RegisterSessionEventConsumers();
                 Logger.Info($"[Subframes] Auto-session started on sequence start: sessionId={sessionId} target='{resolvedTarget}'");
             }
             else
@@ -693,6 +704,7 @@ public sealed class SessionService : IDisposable
                 _snapshot = new HeartbeatSnapshot(null, null, null);
                 _sessionStartTime = DateTime.UtcNow;
                 StartHeartbeatTimer(sessionId);
+                RegisterSessionEventConsumers();
                 await PostFrameAsync(sessionId, e);
             }
             else
@@ -793,9 +805,132 @@ public sealed class SessionService : IDisposable
         }
     }
 
+    // ── Session event consumers (autofocus + meridian flip) ──────────────────
+
+    /// <summary>
+    /// Register as a focuser consumer and subscribe to the AfterMeridianFlip event
+    /// so we can send autofocus and meridian-flip events to the backend.
+    /// Called at the start of each session.
+    /// </summary>
+    private void RegisterSessionEventConsumers()
+    {
+        try
+        {
+            _focuserMediator?.RegisterConsumer(this);
+            Logger.Debug("[Subframes] Registered as IFocuserConsumer for autofocus events.");
+        }
+        catch (Exception ex)
+        {
+            Logger.Warning($"[Subframes] Could not register as focuser consumer: {ex.Message}");
+        }
+
+        try
+        {
+            if (_telescopeMediator is not null)
+                _telescopeMediator.AfterMeridianFlip += OnAfterMeridianFlip;
+            Logger.Debug("[Subframes] Subscribed to AfterMeridianFlip event.");
+        }
+        catch (Exception ex)
+        {
+            Logger.Warning($"[Subframes] Could not subscribe to AfterMeridianFlip: {ex.Message}");
+        }
+    }
+
+    /// <summary>
+    /// Unregister focuser consumer and unsubscribe from AfterMeridianFlip.
+    /// Called at the end of each session (or on clear/dispose).
+    /// </summary>
+    private void UnregisterSessionEventConsumers()
+    {
+        try { _focuserMediator?.RemoveConsumer(this); }
+        catch { /* ignore — mediator may already be gone */ }
+
+        try
+        {
+            if (_telescopeMediator is not null)
+                _telescopeMediator.AfterMeridianFlip -= OnAfterMeridianFlip;
+        }
+        catch { /* ignore */ }
+    }
+
+    // ── IFocuserConsumer ─────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Called by NINA after each completed autofocus run.
+    ///
+    /// Sends an "autofocus" event with filter, temperature, and focuser position
+    /// to the backend. Note: AutoFocusInfo does not expose success status or
+    /// resulting HFR — only the final position and ambient conditions are available.
+    ///
+    /// This method must not throw; any exception is caught and logged.
+    /// </summary>
+    public void UpdateEndAutoFocusRun(AutoFocusInfo autofocusInfo)
+    {
+        var sessionId = _activeSessionId;
+        if (sessionId is null) return;
+
+        try
+        {
+            var request = new EventRequest
+            {
+                SessionId = sessionId,
+                EventType = "autofocus",
+                Timestamp = DateTime.UtcNow.ToString("o"),
+                Metadata  = new Dictionary<string, object?>
+                {
+                    ["filter"]      = autofocusInfo.FilterName,
+                    ["temperature"] = Finite(autofocusInfo.Temperature),
+                    ["position"]    = autofocusInfo.FinalFocuserPosition,
+                },
+            };
+            _ = _apiClient.PostEventAsync(request, CancellationToken.None);
+            Logger.Debug($"[Subframes] Autofocus event queued: session={sessionId} filter={autofocusInfo.FilterName} position={autofocusInfo.FinalFocuserPosition}");
+        }
+        catch (Exception ex)
+        {
+            Logger.Warning($"[Subframes] UpdateEndAutoFocusRun failed: {ex.Message}");
+        }
+    }
+
+    /// <summary>No-op — we don't need device info updates.</summary>
+    public void UpdateDeviceInfo(FocuserInfo deviceInfo) { }
+
+    /// <summary>No-op — we don't need user-focused position updates.</summary>
+    public void UpdateUserFocused(FocuserInfo info) { }
+
+    // ── Meridian flip handler ────────────────────────────────────────────────
+
+    /// <summary>
+    /// Called by NINA after a meridian flip completes (success or failure).
+    /// Sends a "meridian_flip" event to the backend.
+    /// </summary>
+    private void OnAfterMeridianFlip(object? sender, AfterMeridianFlipEventArgs e)
+    {
+        var sessionId = _activeSessionId;
+        if (sessionId is null) return;
+
+        try
+        {
+            var request = new EventRequest
+            {
+                SessionId = sessionId,
+                EventType = "meridian_flip",
+                Timestamp = DateTime.UtcNow.ToString("o"),
+                Metadata  = new Dictionary<string, object?> { ["success"] = e.Success },
+            };
+            _ = _apiClient.PostEventAsync(request, CancellationToken.None);
+            Logger.Debug($"[Subframes] Meridian flip event queued: session={sessionId} success={e.Success}");
+        }
+        catch (Exception ex)
+        {
+            Logger.Warning($"[Subframes] OnAfterMeridianFlip failed: {ex.Message}");
+        }
+    }
+
     public void Dispose()
     {
         StopHeartbeatTimer();
+        UnregisterSessionEventConsumers();
         _imageSaveMediator.ImageSaved -= OnImageSaved;
         _apiClient.Dispose();
         Logger.Debug("[Subframes] SessionService disposed.");

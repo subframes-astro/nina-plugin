@@ -477,3 +477,27 @@ public sealed class IngestFramesData
     [JsonPropertyName("totalFrames")]
     public int TotalFrames { get; init; }
 }
+
+/// <summary>Body for POST /api/v1/ingest/event</summary>
+public sealed class EventRequest
+{
+    [JsonPropertyName("sessionId")]
+    public required string SessionId { get; init; }
+
+    [JsonPropertyName("eventType")]
+    public required string EventType { get; init; }
+
+    [JsonPropertyName("timestamp")]
+    public required string Timestamp { get; init; }
+
+    [JsonPropertyName("metadata")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public object? Metadata { get; init; }
+}
+
+/// <summary>Response payload from POST /api/v1/ingest/event</summary>
+public sealed class EventData
+{
+    [JsonPropertyName("status")]
+    public string? Status { get; init; }
+}
