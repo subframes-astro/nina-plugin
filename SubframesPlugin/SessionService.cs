@@ -566,8 +566,10 @@ public sealed class SessionService : IDisposable
                 Hfr             = Finite(hfr),
                 HfrStdev        = Finite(e.StarDetectionAnalysis?.HFRStDev),
                 StarCount       = e.StarDetectionAnalysis?.DetectedStars,
-                Fwhm            = Finite(e.StarDetectionAnalysis?.FWHM),
-                Eccentricity    = Finite(e.StarDetectionAnalysis?.Eccentricity),
+                Fwhm            = Finite(e.StarDetectionAnalysis?.StarFWHM),
+                // Eccentricity is not exposed by IStarDetectionAnalysis in NINA 3.x stock SDK;
+                // field remains null unless a plugin extends the interface (e.g. Hocus Focus).
+                Eccentricity    = null,
                 CameraTemp      = Finite(meta.Camera?.Temperature),
                 RmsRa           = rmsRa,
                 RmsDec          = rmsDec,
