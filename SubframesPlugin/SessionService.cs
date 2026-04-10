@@ -32,6 +32,7 @@ public sealed class SessionService : IDisposable
     private readonly ISafetyMonitorMediator? _safetyMonitorMediator;
     private readonly IGuiderMediator? _guiderMediator;
     private readonly IWeatherDataMediator? _weatherDataMediator;
+    private readonly IRotatorMediator? _rotatorMediator;
 
     private volatile string? _activeSessionId;
     private volatile string? _activeSessionTargetId;
@@ -77,7 +78,8 @@ public sealed class SessionService : IDisposable
         SyncEngine syncEngine,
         ISafetyMonitorMediator? safetyMonitorMediator = null,
         IGuiderMediator? guiderMediator = null,
-        IWeatherDataMediator? weatherDataMediator = null)
+        IWeatherDataMediator? weatherDataMediator = null,
+        IRotatorMediator? rotatorMediator = null)
     {
         _imageSaveMediator = imageSaveMediator;
         _apiClient = apiClient;
@@ -87,6 +89,7 @@ public sealed class SessionService : IDisposable
         _safetyMonitorMediator = safetyMonitorMediator;
         _guiderMediator = guiderMediator;
         _weatherDataMediator = weatherDataMediator;
+        _rotatorMediator = rotatorMediator;
 
         // Subscribe once; the handler fires for every saved image while NINA runs.
         _imageSaveMediator.ImageSaved += OnImageSaved;
@@ -526,6 +529,17 @@ public sealed class SessionService : IDisposable
             }
             catch { /* weather device not available — leave null */ }
 
+            // Read rotator mechanical position (in-memory snapshot — no I/O, no blocking).
+            // Null when no rotator is connected; never 0 as a fallback (0 deg is a valid angle).
+            double? rotatorPosition = null;
+            try
+            {
+                var rotatorInfo = _rotatorMediator?.GetInfo();
+                if (rotatorInfo is { Connected: true })
+                    rotatorPosition = Finite((double)rotatorInfo.MechanicalPosition);
+            }
+            catch { /* rotator not available — leave null */ }
+
             // Update heartbeat snapshot atomically so the timer always reads consistent state.
             _snapshot = new HeartbeatSnapshot(filter, Finite(hfr), rmsTotal);
 
@@ -560,8 +574,9 @@ public sealed class SessionService : IDisposable
                 Humidity        = humidity,
                 DewPoint        = dewPoint,
                 WindSpeed       = windSpeed,
-                CloudCover      = cloudCover,
-                SkyQuality      = skyQuality,
+                CloudCover       = cloudCover,
+                SkyQuality       = skyQuality,
+                RotatorPosition  = rotatorPosition,
             };
 
             // Write to local SQLite cache — never blocks, never throws.
