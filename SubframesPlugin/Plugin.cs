@@ -128,7 +128,7 @@ public class SubframesPlugin : PluginBase, IPluginManifest, IPartImportsSatisfie
         _weatherDataMediator = weatherDataMediator;
         _frameCache = new FrameCache();
         _syncEngine = new SyncEngine(_frameCache, _apiClient, _options);
-        _sessionService = new SessionService(imageSaveMediator, _apiClient, _options, _frameCache, _syncEngine, safetyMonitorMediator, guiderMediator, weatherDataMediator);
+        _sessionService = new SessionService(imageSaveMediator, _apiClient, _options, _frameCache, _syncEngine, safetyMonitorMediator, guiderMediator, weatherDataMediator, rotatorMediator);
         _optionsVm = new OptionsPanelViewModel(this);
 
         if (_options.IsEnabled && !string.IsNullOrWhiteSpace(_options.ApiKey))

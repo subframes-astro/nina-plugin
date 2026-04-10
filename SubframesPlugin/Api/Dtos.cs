@@ -273,6 +273,10 @@ public sealed class FrameInput
     [JsonPropertyName("skyQuality")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public double? SkyQuality { get; init; }
+
+    [JsonPropertyName("rotatorPosition")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public double? RotatorPosition { get; init; }
 }
 
 /// <summary>Body for POST /api/v1/ingest/station/heartbeat</summary>
