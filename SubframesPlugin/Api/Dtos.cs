@@ -214,6 +214,14 @@ public sealed class FrameInput
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public int? StarCount { get; init; }
 
+    [JsonPropertyName("fwhm")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public double? Fwhm { get; init; }
+
+    [JsonPropertyName("eccentricity")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public double? Eccentricity { get; init; }
+
     [JsonPropertyName("rmsRa")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public double? RmsRa { get; init; }
