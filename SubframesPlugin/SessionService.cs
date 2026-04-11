@@ -176,6 +176,14 @@ public sealed class SessionService : IDisposable, IFocuserConsumer
 
         StopHeartbeatTimer();
         UnregisterSessionEventConsumers();
+
+        // Close any auto-detected target that was never explicitly ended.
+        if (_activeSessionTargetId is not null)
+        {
+            try { await EndTargetAsync(ct); }
+            catch (Exception ex) { Logger.Warning($"[Subframes] EndTarget during session end failed: {ex.Message}"); }
+        }
+
         _activeSessionId = null;
         _activeSessionTargetId = null;
         _sessionStatus = "active";
@@ -319,8 +327,12 @@ public sealed class SessionService : IDisposable, IFocuserConsumer
         if (string.Equals(normalized, "Unknown Target", StringComparison.OrdinalIgnoreCase))
             return;
 
-        // Same target — nothing to do.
-        if (!string.IsNullOrEmpty(_currentTarget)
+        // Same target AND a server-side target already exists — nothing to do.
+        // If _activeSessionTargetId is null, we still need to register the target
+        // even when the name matches (e.g. session was opened with "M42" but no
+        // explicit StartTargetItem was used — the first frame must create it).
+        if (_activeSessionTargetId is not null
+            && !string.IsNullOrEmpty(_currentTarget)
             && string.Equals(CatalogNameNormalizer.Normalize(_currentTarget), normalized, StringComparison.OrdinalIgnoreCase))
             return;
 
