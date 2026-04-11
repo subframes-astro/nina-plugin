@@ -199,9 +199,10 @@ public sealed class SessionService : IDisposable, IFocuserConsumer
         int? skipped = _trackingExposureYield ? _skippedExposures : null;
         int? failed  = _trackingExposureYield ? _failedExposures  : null;
 
-        // Query TS for per-frame grading results before clearing state.
+        // Query TS for per-frame grading results and all-time progress before clearing state.
         var sessionEnd = DateTime.UtcNow;
-        var tsGrading = TsGradingReader.ReadGradingResults(_sessionStartTime, sessionEnd);
+        var tsGrading  = TsGradingReader.ReadGradingResults(_sessionStartTime, sessionEnd);
+        var tsProgress = TsProgressReader.ReadProgress();
 
         _activeSessionId = null;
         _activeSessionTargetId = null;
@@ -210,6 +211,9 @@ public sealed class SessionService : IDisposable, IFocuserConsumer
 
         if (tsGrading is { Count: > 0 })
             await _apiClient.PostTsGradingAsync(sessionId, tsGrading, ct);
+
+        if (tsProgress is { Count: > 0 })
+            await _apiClient.PostTsProgressAsync(sessionId, tsProgress, ct);
 
         Logger.Info("[Subframes] Session ended.");
     }
