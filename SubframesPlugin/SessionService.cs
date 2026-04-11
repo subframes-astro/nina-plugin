@@ -1,5 +1,6 @@
 using System.IO;
 using System.Reflection;
+using System.Runtime.CompilerServices;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using NINA.Core.Model;
@@ -63,11 +64,13 @@ public sealed class SessionService : IDisposable, IFocuserConsumer
     // Exposure yield counters — thread-safe via Interlocked.
     // Remain null until a detection mechanism is wired up; null means "not tracked"
     // so the backend omits these fields rather than showing incorrect zeros.
-    // TODO: subscribe to a NINA failure/skip event and call IncrementSkippedExposures /
-    // IncrementFailedExposures once NINA SDK exposes a reliable hook.
     private int _skippedExposures;
     private int _failedExposures;
     private volatile bool _trackingExposureYield;
+
+    // Exposure yield polling — 1-second timer polls sequencer for LIGHT frame skip/fail transitions.
+    private Timer? _yieldPollTimer;
+    private Dictionary<int, string>? _prevItemStatuses;
 
     private sealed record HeartbeatSnapshot(string? Filter, double? LatestHfr, double? LatestRmsTotal);
 
@@ -208,6 +211,7 @@ public sealed class SessionService : IDisposable, IFocuserConsumer
             _snapshot = new HeartbeatSnapshot(null, null, null);
             _sessionStartTime = DateTime.UtcNow;
             StartHeartbeatTimer(sessionId);
+            StartYieldPollTimer();
             SessionStarted?.Invoke(this, EventArgs.Empty);
             RegisterSessionEventConsumers();
         }
@@ -532,6 +536,7 @@ public sealed class SessionService : IDisposable, IFocuserConsumer
                 _snapshot = new HeartbeatSnapshot(null, null, null);
                 _sessionStartTime = DateTime.UtcNow;
                 StartHeartbeatTimer(sessionId);
+                StartYieldPollTimer();
                 RegisterSessionEventConsumers();
                 Logger.Info($"[Subframes] Auto-session started on sequence start: sessionId={sessionId} target='{resolvedTarget}'");
             }
@@ -823,6 +828,7 @@ public sealed class SessionService : IDisposable, IFocuserConsumer
                 _snapshot = new HeartbeatSnapshot(null, null, null);
                 _sessionStartTime = DateTime.UtcNow;
                 StartHeartbeatTimer(sessionId);
+                StartYieldPollTimer();
                 RegisterSessionEventConsumers();
                 await PostFrameAsync(sessionId, e);
             }
@@ -841,6 +847,98 @@ public sealed class SessionService : IDisposable, IFocuserConsumer
         }
     }
 
+    // ── Exposure yield polling ───────────────────────────────────────────────
+
+    /// <summary>
+    /// Provides the list of current running sequence items for exposure yield tracking.
+    /// Set by Plugin.cs after <c>ISequenceMediator</c> is resolved via MEF.
+    /// Returns null when the sequencer is unavailable or the method does not exist on
+    /// this NINA build — polling will continue but <see cref="_trackingExposureYield"/>
+    /// will remain false so the backend receives null counters (not tracked).
+    /// </summary>
+    public Func<System.Collections.IList?>? SequenceItemsProvider { get; set; }
+
+    private void StartYieldPollTimer()
+    {
+        StopYieldPollTimer();
+        _prevItemStatuses = null;
+        _yieldPollTimer = new Timer(PollExposureYield, null, TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(1));
+    }
+
+    private void StopYieldPollTimer()
+    {
+        _yieldPollTimer?.Dispose();
+        _yieldPollTimer = null;
+        _prevItemStatuses = null;
+    }
+
+    /// <summary>
+    /// Timer callback — fires every second during an active session to detect LIGHT
+    /// frame exposures that have transitioned to SKIPPED or FAILED in the NINA sequencer.
+    /// All exceptions are caught; polling errors must never affect imaging.
+    /// </summary>
+    private void PollExposureYield(object? state)
+    {
+        try
+        {
+            var provider = SequenceItemsProvider;
+            if (provider is null) return;
+
+            System.Collections.IList? items;
+            try
+            {
+                items = provider.Invoke();
+            }
+            catch (Exception ex)
+            {
+                Logger.Debug($"[Subframes] PollExposureYield: sequence item provider threw, disabling yield tracking. {ex.Message}");
+                _trackingExposureYield = false;
+                StopYieldPollTimer();
+                return;
+            }
+
+            if (items is null) return;
+
+            // At least one successful poll — enable yield tracking so session end reports counts.
+            _trackingExposureYield = true;
+
+            var currentStatuses = new Dictionary<int, string>(items.Count);
+
+            foreach (var item in items)
+            {
+                if (item is null) continue;
+                var itemType = item.GetType();
+
+                // Only track LIGHT frame exposures; skip calibration frames.
+                var imageType = itemType.GetProperty("ImageType")?.GetValue(item)?.ToString();
+                if (!string.Equals(imageType, "LIGHT", StringComparison.OrdinalIgnoreCase))
+                    continue;
+
+                // Use object identity as a stable key across polls.
+                var key = RuntimeHelpers.GetHashCode(item);
+                var status = itemType.GetProperty("Status")?.GetValue(item)?.ToString() ?? string.Empty;
+                currentStatuses[key] = status;
+
+                // Detect transitions to SKIPPED or FAILED.
+                if (_prevItemStatuses is not null
+                    && _prevItemStatuses.TryGetValue(key, out var prevStatus)
+                    && !string.Equals(prevStatus, status, StringComparison.OrdinalIgnoreCase))
+                {
+                    if (string.Equals(status, "SKIPPED", StringComparison.OrdinalIgnoreCase))
+                        IncrementSkippedExposures();
+                    else if (string.Equals(status, "FAILED", StringComparison.OrdinalIgnoreCase))
+                        IncrementFailedExposures();
+                }
+            }
+
+            _prevItemStatuses = currentStatuses;
+        }
+        catch (Exception ex)
+        {
+            Logger.Debug($"[Subframes] PollExposureYield error: {ex.Message}");
+        }
+    }
+
     // ── Heartbeat timer ──────────────────────────────────────────────────────
 
     private void StartHeartbeatTimer(string sessionId)
@@ -853,6 +951,7 @@ public sealed class SessionService : IDisposable, IFocuserConsumer
 
     private void StopHeartbeatTimer()
     {
+        StopYieldPollTimer();
         _heartbeatCts?.Cancel();
         _heartbeatCts?.Dispose();
         _heartbeatCts = null;

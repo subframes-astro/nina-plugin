@@ -203,6 +203,7 @@ public class SubframesPlugin : PluginBase, IPluginManifest, IPartImportsSatisfie
 
             _sequenceEventsSubscribed = true;
             _sessionService.ActiveTargetResolver = ResolveActiveTarget;
+            _sessionService.SequenceItemsProvider = GetSequenceCurrentItems;
             Logger.Debug("[Subframes] Subscribed to ISequenceMediator.SequenceFinished.");
             return true;
         }
@@ -274,6 +275,7 @@ public class SubframesPlugin : PluginBase, IPluginManifest, IPartImportsSatisfie
                 SequenceMediator.SequenceFinished -= OnSequenceFinished;
             }
             _sessionService.ActiveTargetResolver = null;
+            _sessionService.SequenceItemsProvider = null;
             _sessionService.SessionStarted -= OnSessionStarted;
             UnsubscribeFromContainerEvents();
             StopStationHeartbeat();
@@ -429,6 +431,28 @@ public class SubframesPlugin : PluginBase, IPluginManifest, IPartImportsSatisfie
             Logger.Debug($"[Subframes] ResolveActiveTarget failed: {ex.Message}");
         }
         return null;
+    }
+
+    /// <summary>
+    /// Returns the flat list of all sequence items currently tracked by the advanced sequencer,
+    /// via reflection on <c>GetAdvancedSequencerCurrentRunningItems</c>.  Returns null when the
+    /// mediator is unavailable or the method does not exist on this NINA build — the caller
+    /// treats null as "not tracked" and leaves <see cref="SessionService.SequenceItemsProvider"/>
+    /// producing null, which keeps yield counters untracked at session end.
+    /// </summary>
+    private System.Collections.IList? GetSequenceCurrentItems()
+    {
+        try
+        {
+            var method = SequenceMediator?.GetType()
+                .GetMethod("GetAdvancedSequencerCurrentRunningItems");
+            return method?.Invoke(SequenceMediator, null) as System.Collections.IList;
+        }
+        catch (Exception ex)
+        {
+            Logger.Debug($"[Subframes] GetSequenceCurrentItems failed: {ex.Message}");
+            return null;
+        }
     }
 
     /// <summary>Read a nested string property via reflection: obj.prop1.prop2.</summary>
