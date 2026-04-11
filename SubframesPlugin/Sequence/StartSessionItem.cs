@@ -121,8 +121,8 @@ public partial class StartSessionItem : SequenceItem, IValidatable
             if (camInfo is { Connected: true })
             {
                 pixelSizeMicrons = camInfo.PixelSize > 0 ? camInfo.PixelSize : null;
-                sensorWidthPx    = camInfo.CameraXSize > 0 ? camInfo.CameraXSize : null;
-                sensorHeightPx   = camInfo.CameraYSize > 0 ? camInfo.CameraYSize : null;
+                sensorWidthPx    = camInfo.XSize > 0 ? camInfo.XSize : null;
+                sensorHeightPx   = camInfo.YSize > 0 ? camInfo.YSize : null;
             }
         }
         catch (Exception ex)

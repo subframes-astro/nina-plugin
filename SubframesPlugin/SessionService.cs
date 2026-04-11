@@ -886,13 +886,13 @@ public sealed class SessionService : IDisposable, IFocuserConsumer
                 Timestamp = DateTime.UtcNow.ToString("o"),
                 Metadata  = new Dictionary<string, object?>
                 {
-                    ["filter"]      = autofocusInfo.FilterName,
+                    ["filter"]      = autofocusInfo.Filter,
                     ["temperature"] = Finite(autofocusInfo.Temperature),
-                    ["position"]    = autofocusInfo.FinalFocuserPosition,
+                    ["position"]    = autofocusInfo.Position,
                 },
             };
             _ = _apiClient.PostEventAsync(request, CancellationToken.None);
-            Logger.Debug($"[Subframes] Autofocus event queued: session={sessionId} filter={autofocusInfo.FilterName} position={autofocusInfo.FinalFocuserPosition}");
+            Logger.Debug($"[Subframes] Autofocus event queued: session={sessionId} filter={autofocusInfo.Filter} position={autofocusInfo.Position}");
         }
         catch (Exception ex)
         {
@@ -912,10 +912,10 @@ public sealed class SessionService : IDisposable, IFocuserConsumer
     /// Called by NINA after a meridian flip completes (success or failure).
     /// Sends a "meridian_flip" event to the backend.
     /// </summary>
-    private void OnAfterMeridianFlip(object? sender, AfterMeridianFlipEventArgs e)
+    private Task OnAfterMeridianFlip(object? sender, AfterMeridianFlipEventArgs e)
     {
         var sessionId = _activeSessionId;
-        if (sessionId is null) return;
+        if (sessionId is null) return Task.CompletedTask;
 
         try
         {
@@ -933,6 +933,7 @@ public sealed class SessionService : IDisposable, IFocuserConsumer
         {
             Logger.Warning($"[Subframes] OnAfterMeridianFlip failed: {ex.Message}");
         }
+        return Task.CompletedTask;
     }
 
     public void Dispose()
