@@ -512,14 +512,17 @@ public sealed class SessionService : IDisposable, IFocuserConsumer
             var hasTarget = !string.IsNullOrWhiteSpace(targetName) && !(targetRa == 0 && targetDec == 0);
             var resolvedTarget = hasTarget ? targetName! : string.Empty;
 
+            var plannedTargets = TsPlannedTargetReader.ReadPlannedTargets();
+
             var request = new StartSessionRequest
             {
-                TargetName   = resolvedTarget,
-                TargetRa     = targetRa,
-                TargetDec    = targetDec,
-                StartTime    = DateTime.UtcNow.ToString("o"),
-                InstanceId   = string.IsNullOrWhiteSpace(options.InstanceId) ? null : options.InstanceId,
-                InstanceName = string.IsNullOrWhiteSpace(options.InstanceName) ? null : options.InstanceName,
+                TargetName     = resolvedTarget,
+                TargetRa       = targetRa,
+                TargetDec      = targetDec,
+                StartTime      = DateTime.UtcNow.ToString("o"),
+                InstanceId     = string.IsNullOrWhiteSpace(options.InstanceId) ? null : options.InstanceId,
+                InstanceName   = string.IsNullOrWhiteSpace(options.InstanceName) ? null : options.InstanceName,
+                PlannedTargets = plannedTargets,
             };
 
             var sessionId = await _apiClient.StartSessionAsync(request, CancellationToken.None);
