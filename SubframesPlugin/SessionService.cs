@@ -120,6 +120,13 @@ public sealed class SessionService : IDisposable, IFocuserConsumer
     /// </summary>
     public Func<(string? name, double ra, double dec)?>? ActiveTargetResolver { get; set; }
 
+    /// <summary>
+    /// Raised after a new session is successfully started via <see cref="StartSessionAsync"/>.
+    /// Plugin.cs subscribes to this event to fire an immediate station heartbeat so the
+    /// website reflects equipment data and imaging status without waiting for the 5-minute timer.
+    /// </summary>
+    public event EventHandler? SessionStarted;
+
     /// <summary>The server-assigned session ID, or null if no session is active.</summary>
     public string? ActiveSessionId => _activeSessionId;
 
@@ -163,6 +170,7 @@ public sealed class SessionService : IDisposable, IFocuserConsumer
             _snapshot = new HeartbeatSnapshot(null, null, null);
             _sessionStartTime = DateTime.UtcNow;
             StartHeartbeatTimer(sessionId);
+            SessionStarted?.Invoke(this, EventArgs.Empty);
             RegisterSessionEventConsumers();
         }
         else
