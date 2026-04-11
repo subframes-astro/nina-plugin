@@ -222,6 +222,8 @@ public sealed class SubframesClient : IDisposable
     /// </summary>
     public async Task EndSessionAsync(
         string sessionId,
+        int? skippedExposures = null,
+        int? failedExposures = null,
         CancellationToken ct = default)
     {
         if (!_options.IsEnabled) return;
@@ -233,7 +235,9 @@ public sealed class SubframesClient : IDisposable
             var body = new EndSessionRequest
             {
                 SessionId = sessionId,
-                EndTime = DateTime.UtcNow.ToString("o")
+                EndTime = DateTime.UtcNow.ToString("o"),
+                SkippedExposures = skippedExposures,
+                FailedExposures = failedExposures,
             };
             var jsonBytes = SerializeJson(body);
             if (_options.IsDebugEnabled)

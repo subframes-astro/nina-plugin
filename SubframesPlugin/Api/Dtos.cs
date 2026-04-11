@@ -76,6 +76,14 @@ public sealed class EndSessionRequest
 
     [JsonPropertyName("endTime")]
     public required string EndTime { get; init; }
+
+    [JsonPropertyName("skippedExposures")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public int? SkippedExposures { get; init; }
+
+    [JsonPropertyName("failedExposures")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public int? FailedExposures { get; init; }
 }
 
 /// <summary>Body for POST /api/v1/ingest/heartbeat</summary>
