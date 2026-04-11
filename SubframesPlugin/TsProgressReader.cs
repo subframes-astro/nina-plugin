@@ -68,7 +68,7 @@ internal static class TsProgressReader
                 COALESCE((
                     SELECT COUNT(*)
                     FROM acquiredimage ai
-                    WHERE ai.FilterName = ep.FilterName
+                    WHERE ai.ExposurePlanId = ep.Id
                 ), 0) AS acquired
             FROM ExposurePlan ep
             JOIN Target  t ON t.Id = ep.TargetId

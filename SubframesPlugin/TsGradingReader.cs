@@ -12,7 +12,7 @@ namespace Subframes.NinaPlugin;
 /// </summary>
 internal static class TsGradingReader
 {
-    private const int MaxEntries = 2000;
+    private const int MaxEntries = 500;
 
     /// <summary>
     /// Reads grading results for frames acquired within the session time window.
