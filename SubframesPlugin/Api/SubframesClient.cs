@@ -222,6 +222,8 @@ public sealed class SubframesClient : IDisposable
     /// </summary>
     public async Task EndSessionAsync(
         string sessionId,
+        int? skippedExposures = null,
+        int? failedExposures = null,
         CancellationToken ct = default)
     {
         if (!_options.IsEnabled) return;
@@ -233,7 +235,9 @@ public sealed class SubframesClient : IDisposable
             var body = new EndSessionRequest
             {
                 SessionId = sessionId,
-                EndTime = DateTime.UtcNow.ToString("o")
+                EndTime = DateTime.UtcNow.ToString("o"),
+                SkippedExposures = skippedExposures,
+                FailedExposures = failedExposures,
             };
             var jsonBytes = SerializeJson(body);
             if (_options.IsDebugEnabled)
@@ -638,6 +642,142 @@ public sealed class SubframesClient : IDisposable
         catch (Exception ex)
         {
             return (false, ex.Message);
+        }
+    }
+
+    // ── TS Grading ───────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// POST Target Scheduler grading results for frames captured during a session.
+    /// 404 → no-op (older API). All other failures are logged and swallowed.
+    /// </summary>
+    public async Task PostTsGradingAsync(
+        string sessionId,
+        List<TsGradingInput> entries,
+        CancellationToken ct = default)
+    {
+        if (!_options.IsEnabled) return;
+
+        try
+        {
+            SetAuthHeader();
+            var url = $"{BaseUrl}/api/v1/ingest/session/{sessionId}/ts-grading";
+            var body = new TsGradingRequest { Entries = entries };
+            var jsonBytes = SerializeJson(body);
+            if (_options.IsDebugEnabled)
+                Logger.Info($"[Subframes] POST {url} entries={entries.Count}");
+
+            using var response = await PostWithRetryAsync(url, jsonBytes, ct);
+
+            if (response.StatusCode == System.Net.HttpStatusCode.NotFound)
+            {
+                Logger.Debug("[Subframes] ts-grading endpoint not found — no-op");
+                return;
+            }
+
+            if (!response.IsSuccessStatusCode)
+            {
+                var errorBody = await response.Content.ReadAsStringAsync(ct);
+                Logger.Warning($"[Subframes] PostTsGrading HTTP {(int)response.StatusCode}: {errorBody}");
+                return;
+            }
+
+            Logger.Info($"[Subframes] TS grading sent: {entries.Count} entry/entries for session {sessionId}");
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception ex)
+        {
+            Logger.Warning($"[Subframes] PostTsGrading failed (session={sessionId}): {ex.Message}");
+        }
+    }
+
+    /// <summary>
+    /// POST all-time Target Scheduler project/target progress at session end.
+    /// 404 → no-op (older API). All other failures are logged and swallowed.
+    /// </summary>
+    public async Task PostTsProgressAsync(
+        string sessionId,
+        List<TsProgressInput> entries,
+        CancellationToken ct = default)
+    {
+        if (!_options.IsEnabled) return;
+
+        try
+        {
+            SetAuthHeader();
+            var url = $"{BaseUrl}/api/v1/ingest/session/{sessionId}/ts-progress";
+            var body = new TsProgressRequest { Entries = entries };
+            var jsonBytes = SerializeJson(body);
+            if (_options.IsDebugEnabled)
+                Logger.Info($"[Subframes] POST {url} entries={entries.Count}");
+
+            using var response = await PostWithRetryAsync(url, jsonBytes, ct);
+
+            if (response.StatusCode == System.Net.HttpStatusCode.NotFound)
+            {
+                Logger.Debug("[Subframes] ts-progress endpoint not found — no-op");
+                return;
+            }
+
+            if (!response.IsSuccessStatusCode)
+            {
+                var errorBody = await response.Content.ReadAsStringAsync(ct);
+                Logger.Warning($"[Subframes] PostTsProgress HTTP {(int)response.StatusCode}: {errorBody}");
+                return;
+            }
+
+            Logger.Info($"[Subframes] TS progress sent: {entries.Count} row(s) for session {sessionId}");
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception ex)
+        {
+            Logger.Warning($"[Subframes] PostTsProgress failed (session={sessionId}): {ex.Message}");
+        }
+    }
+
+    // ── Session Event ────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Post a discrete session event (e.g. autofocus completion, meridian flip).
+    /// Fire-and-forget from the caller's perspective — uses a 5-second timeout,
+    /// no retry. Failures are logged and swallowed so event losses never interrupt
+    /// imaging.
+    /// </summary>
+    public async Task PostEventAsync(
+        EventRequest request,
+        CancellationToken ct = default)
+    {
+        if (!_options.IsEnabled) return;
+
+        using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        cts.CancelAfter(TimeSpan.FromSeconds(5));
+
+        try
+        {
+            SetAuthHeader();
+            var url = $"{BaseUrl}/api/v1/ingest/event";
+            var jsonBytes = SerializeJson(request);
+            if (_options.IsDebugEnabled)
+                Logger.Info($"[Subframes] POST {url} body={System.Text.Encoding.UTF8.GetString(jsonBytes)}");
+
+            using var response = await _http.PostAsync(url, CreateJsonContent(jsonBytes), cts.Token);
+
+            if (!response.IsSuccessStatusCode)
+            {
+                var body = await response.Content.ReadAsStringAsync(cts.Token);
+                Logger.Warning($"[Subframes] PostEvent HTTP {(int)response.StatusCode}: {body}");
+                return;
+            }
+
+            Logger.Debug($"[Subframes] Event posted: type={request.EventType} session={request.SessionId}");
+        }
+        catch (OperationCanceledException)
+        {
+            Logger.Warning($"[Subframes] PostEvent timed out (type={request.EventType} session={request.SessionId})");
+        }
+        catch (Exception ex)
+        {
+            Logger.Warning($"[Subframes] PostEvent failed (type={request.EventType}): {ex.Message}");
         }
     }
 
