@@ -59,6 +59,15 @@ public sealed class SessionService : IDisposable, IFocuserConsumer
     private DateTime _lastFrameTime;
     private int _autoSessionGuard; // Interlocked: 0 = idle, 1 = auto-start in progress
 
+    // Exposure yield counters — thread-safe via Interlocked.
+    // Remain null until a detection mechanism is wired up; null means "not tracked"
+    // so the backend omits these fields rather than showing incorrect zeros.
+    // TODO: subscribe to a NINA failure/skip event and call IncrementSkippedExposures /
+    // IncrementFailedExposures once NINA SDK exposes a reliable hook.
+    private int _skippedExposures;
+    private int _failedExposures;
+    private volatile bool _trackingExposureYield;
+
     private sealed record HeartbeatSnapshot(string? Filter, double? LatestHfr, double? LatestRmsTotal);
 
     /// <summary>Replace non-finite doubles (NaN, ±Infinity) with null so JSON serialization never throws.</summary>
@@ -131,6 +140,9 @@ public sealed class SessionService : IDisposable, IFocuserConsumer
         var sessionId = await _apiClient.StartSessionAsync(request, ct);
         _activeSessionId = sessionId;
         Interlocked.Exchange(ref _frameCounter, 0);
+        Interlocked.Exchange(ref _skippedExposures, 0);
+        Interlocked.Exchange(ref _failedExposures, 0);
+        _trackingExposureYield = false;
 
         if (sessionId is not null)
         {
@@ -184,10 +196,13 @@ public sealed class SessionService : IDisposable, IFocuserConsumer
             catch (Exception ex) { Logger.Warning($"[Subframes] EndTarget during session end failed: {ex.Message}"); }
         }
 
+        int? skipped = _trackingExposureYield ? _skippedExposures : null;
+        int? failed  = _trackingExposureYield ? _failedExposures  : null;
+
         _activeSessionId = null;
         _activeSessionTargetId = null;
         _sessionStatus = "active";
-        await _apiClient.EndSessionAsync(sessionId, ct);
+        await _apiClient.EndSessionAsync(sessionId, skipped, failed, ct);
         Logger.Info("[Subframes] Session ended.");
     }
 
@@ -198,6 +213,36 @@ public sealed class SessionService : IDisposable, IFocuserConsumer
         UnregisterSessionEventConsumers();
         _activeSessionId = null;
         Logger.Info("[Subframes] Session cleared.");
+    }
+
+    /// <summary>
+    /// Record one skipped exposure for the current session.
+    /// Thread-safe; safe to call from any thread.
+    /// Call <see cref="EnableExposureYieldTracking"/> before the first increment.
+    /// </summary>
+    public void IncrementSkippedExposures()
+    {
+        Interlocked.Increment(ref _skippedExposures);
+    }
+
+    /// <summary>
+    /// Record one failed exposure for the current session.
+    /// Thread-safe; safe to call from any thread.
+    /// Call <see cref="EnableExposureYieldTracking"/> before the first increment.
+    /// </summary>
+    public void IncrementFailedExposures()
+    {
+        Interlocked.Increment(ref _failedExposures);
+    }
+
+    /// <summary>
+    /// Signal that a detection mechanism is active and exposure counts should be
+    /// reported at session end. Without this flag the counters are omitted from
+    /// the session-end payload (null = not tracked), avoiding false-zero reports.
+    /// </summary>
+    public void EnableExposureYieldTracking()
+    {
+        _trackingExposureYield = true;
     }
 
     // ── Target lifecycle ─────────────────────────────────────────────────────
