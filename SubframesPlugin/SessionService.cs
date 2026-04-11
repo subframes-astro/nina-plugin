@@ -1,4 +1,5 @@
 using System.IO;
+using System.Reflection;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using NINA.Core.Model;
@@ -72,6 +73,43 @@ public sealed class SessionService : IDisposable, IFocuserConsumer
 
     /// <summary>Replace non-finite doubles (NaN, ±Infinity) with null so JSON serialization never throws.</summary>
     private static double? Finite(double? v) => v is double d && double.IsFinite(d) ? v : null;
+
+    // ── Hocus Focus reflection cache ─────────────────────────────────────────
+    // FWHM and Eccentricity are not on IStarDetectionAnalysis in stock NINA 3.x;
+    // they only exist on concrete implementations (e.g. Hocus Focus plugin).
+    // We resolve the PropertyInfo once and cache it to avoid per-frame overhead.
+    private static PropertyInfo? _fwhmProp;
+    private static PropertyInfo? _eccentricityProp;
+    private static bool _fwhmResolved;
+    private static bool _eccentricityResolved;
+
+    /// <summary>
+    /// Reads a <c>double</c> property from <paramref name="obj"/> by reflection, trying each
+    /// candidate <paramref name="names"/> in order. The resolved <see cref="PropertyInfo"/> is
+    /// cached in <paramref name="cached"/> after the first call so subsequent calls are O(1).
+    /// Returns <c>null</c> when the object is null, when no matching property exists, or when
+    /// the value is not a <c>double</c>.
+    /// </summary>
+    private static double? ReadReflectedDouble(object? obj, ref PropertyInfo? cached, ref bool resolved, params string[] names)
+    {
+        if (obj == null) return null;
+        if (!resolved)
+        {
+            var type = obj.GetType();
+            foreach (var name in names)
+            {
+                cached = type.GetProperty(name, BindingFlags.Public | BindingFlags.Instance);
+                if (cached != null) break;
+            }
+            resolved = true;
+            Logger.Debug(cached != null
+                ? $"[Subframes] Reflection: found property '{cached.Name}' on {type.Name} for FWHM/Eccentricity."
+                : $"[Subframes] Reflection: no FWHM/Eccentricity property found on {type.Name} — fields will be null.");
+        }
+        if (cached == null) return null;
+        var val = cached.GetValue(obj);
+        return val is double d ? d : null;
+    }
 
     /// <summary>Returns the safety monitor's IsSafe value when connected, or null if unavailable.</summary>
     private bool? ReadIsSafe()
@@ -656,12 +694,8 @@ public sealed class SessionService : IDisposable, IFocuserConsumer
                 Hfr             = Finite(hfr),
                 HfrStdev        = Finite(e.StarDetectionAnalysis?.HFRStDev),
                 StarCount       = e.StarDetectionAnalysis?.DetectedStars,
-                // FWHM and Eccentricity: neither FWHM nor Eccentricity are defined on
-                // IStarDetectionAnalysis in NINA 3.x. StarFWHM and Eccentricity only exist
-                // on concrete implementations (e.g. Hocus Focus plugin), not the stock interface.
-                // Fields remain null until a typed accessor or plugin cast path is identified.
-                Fwhm            = null,
-                Eccentricity    = null,
+                Fwhm            = Finite(ReadReflectedDouble(e.StarDetectionAnalysis, ref _fwhmProp, ref _fwhmResolved, "FWHM", "StarFWHM")),
+                Eccentricity    = Finite(ReadReflectedDouble(e.StarDetectionAnalysis, ref _eccentricityProp, ref _eccentricityResolved, "Eccentricity")),
                 CameraTemp      = Finite(meta.Camera?.Temperature),
                 RmsRa           = rmsRa,
                 RmsDec          = rmsDec,
