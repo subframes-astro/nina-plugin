@@ -533,6 +533,61 @@ public sealed class IngestFramesData
     public int TotalFrames { get; init; }
 }
 
+/// <summary>Body for POST /api/v1/ingest/session/{id}/ts-grading</summary>
+public sealed class TsGradingRequest
+{
+    [JsonPropertyName("entries")]
+    public required List<TsGradingInput> Entries { get; init; }
+}
+
+/// <summary>One frame grading result from Target Scheduler.</summary>
+public sealed class TsGradingInput
+{
+    [JsonPropertyName("filterName")]
+    public required string FilterName { get; init; }
+
+    [JsonPropertyName("timestamp")]
+    public required string Timestamp { get; init; }
+
+    /// <summary>TS convention: -1 = ungraded, 0 = rejected, 1 = accepted.</summary>
+    [JsonPropertyName("gradingStatus")]
+    public int GradingStatus { get; init; }
+
+    [JsonPropertyName("rejectReason")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? RejectReason { get; init; }
+}
+
+/// <summary>Body for POST /api/v1/ingest/session/{id}/ts-progress</summary>
+public sealed class TsProgressRequest
+{
+    [JsonPropertyName("entries")]
+    public required List<TsProgressInput> Entries { get; init; }
+}
+
+/// <summary>All-time per-filter progress for one (project, target, filter) combination.</summary>
+public sealed class TsProgressInput
+{
+    [JsonPropertyName("projectName")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? ProjectName { get; init; }
+
+    [JsonPropertyName("targetName")]
+    public required string TargetName { get; init; }
+
+    [JsonPropertyName("filterName")]
+    public required string FilterName { get; init; }
+
+    [JsonPropertyName("desired")]
+    public int Desired { get; init; }
+
+    [JsonPropertyName("acquired")]
+    public int Acquired { get; init; }
+
+    [JsonPropertyName("accepted")]
+    public int Accepted { get; init; }
+}
+
 /// <summary>Body for POST /api/v1/ingest/event</summary>
 public sealed class EventRequest
 {

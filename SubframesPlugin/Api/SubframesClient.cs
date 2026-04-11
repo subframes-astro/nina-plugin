@@ -645,6 +645,96 @@ public sealed class SubframesClient : IDisposable
         }
     }
 
+    // ── TS Grading ───────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// POST Target Scheduler grading results for frames captured during a session.
+    /// 404 → no-op (older API). All other failures are logged and swallowed.
+    /// </summary>
+    public async Task PostTsGradingAsync(
+        string sessionId,
+        List<TsGradingInput> entries,
+        CancellationToken ct = default)
+    {
+        if (!_options.IsEnabled) return;
+
+        try
+        {
+            SetAuthHeader();
+            var url = $"{BaseUrl}/api/v1/ingest/session/{sessionId}/ts-grading";
+            var body = new TsGradingRequest { Entries = entries };
+            var jsonBytes = SerializeJson(body);
+            if (_options.IsDebugEnabled)
+                Logger.Info($"[Subframes] POST {url} entries={entries.Count}");
+
+            using var response = await PostWithRetryAsync(url, jsonBytes, ct);
+
+            if (response.StatusCode == System.Net.HttpStatusCode.NotFound)
+            {
+                Logger.Debug("[Subframes] ts-grading endpoint not found — no-op");
+                return;
+            }
+
+            if (!response.IsSuccessStatusCode)
+            {
+                var errorBody = await response.Content.ReadAsStringAsync(ct);
+                Logger.Warning($"[Subframes] PostTsGrading HTTP {(int)response.StatusCode}: {errorBody}");
+                return;
+            }
+
+            Logger.Info($"[Subframes] TS grading sent: {entries.Count} entry/entries for session {sessionId}");
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception ex)
+        {
+            Logger.Warning($"[Subframes] PostTsGrading failed (session={sessionId}): {ex.Message}");
+        }
+    }
+
+    /// <summary>
+    /// POST all-time Target Scheduler project/target progress at session end.
+    /// 404 → no-op (older API). All other failures are logged and swallowed.
+    /// </summary>
+    public async Task PostTsProgressAsync(
+        string sessionId,
+        List<TsProgressInput> entries,
+        CancellationToken ct = default)
+    {
+        if (!_options.IsEnabled) return;
+
+        try
+        {
+            SetAuthHeader();
+            var url = $"{BaseUrl}/api/v1/ingest/session/{sessionId}/ts-progress";
+            var body = new TsProgressRequest { Entries = entries };
+            var jsonBytes = SerializeJson(body);
+            if (_options.IsDebugEnabled)
+                Logger.Info($"[Subframes] POST {url} entries={entries.Count}");
+
+            using var response = await PostWithRetryAsync(url, jsonBytes, ct);
+
+            if (response.StatusCode == System.Net.HttpStatusCode.NotFound)
+            {
+                Logger.Debug("[Subframes] ts-progress endpoint not found — no-op");
+                return;
+            }
+
+            if (!response.IsSuccessStatusCode)
+            {
+                var errorBody = await response.Content.ReadAsStringAsync(ct);
+                Logger.Warning($"[Subframes] PostTsProgress HTTP {(int)response.StatusCode}: {errorBody}");
+                return;
+            }
+
+            Logger.Info($"[Subframes] TS progress sent: {entries.Count} row(s) for session {sessionId}");
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception ex)
+        {
+            Logger.Warning($"[Subframes] PostTsProgress failed (session={sessionId}): {ex.Message}");
+        }
+    }
+
     // ── Session Event ────────────────────────────────────────────────────────
 
     /// <summary>
