@@ -129,6 +129,7 @@ public class SubframesPlugin : PluginBase, IPluginManifest, IPartImportsSatisfie
         _frameCache = new FrameCache();
         _syncEngine = new SyncEngine(_frameCache, _apiClient, _options);
         _sessionService = new SessionService(imageSaveMediator, _apiClient, _options, _frameCache, _syncEngine, safetyMonitorMediator, guiderMediator, weatherDataMediator);
+        _sessionService.SessionStarted += OnSessionStarted;
         _optionsVm = new OptionsPanelViewModel(this);
 
         if (_options.IsEnabled && !string.IsNullOrWhiteSpace(_options.ApiKey))
@@ -273,6 +274,7 @@ public class SubframesPlugin : PluginBase, IPluginManifest, IPartImportsSatisfie
                 SequenceMediator.SequenceFinished -= OnSequenceFinished;
             }
             _sessionService.ActiveTargetResolver = null;
+            _sessionService.SessionStarted -= OnSessionStarted;
             UnsubscribeFromContainerEvents();
             StopStationHeartbeat();
             _syncEngine.Dispose();
@@ -363,6 +365,24 @@ public class SubframesPlugin : PluginBase, IPluginManifest, IPartImportsSatisfie
             _ = _sessionService.EndSessionAsync(CancellationToken.None);
         }
         return Task.CompletedTask;
+    }
+
+    /// <summary>
+    /// Called when SessionService successfully starts a new session.
+    /// Fires an immediate station heartbeat so the website reflects equipment data
+    /// and imaging status right away — without waiting for the 5-minute timer.
+    /// </summary>
+    private void OnSessionStarted(object? sender, EventArgs e)
+    {
+        try
+        {
+            _ = _apiClient.SendStationHeartbeatAsync(BuildStationHeartbeatRequest(), CancellationToken.None);
+            Logger.Debug("[Subframes] Immediate station heartbeat triggered on session start.");
+        }
+        catch (Exception ex)
+        {
+            Logger.Warning($"[Subframes] OnSessionStarted: station heartbeat failed: {ex.Message}");
+        }
     }
 
     /// <summary>
