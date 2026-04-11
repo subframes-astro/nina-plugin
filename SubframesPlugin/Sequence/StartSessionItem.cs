@@ -141,6 +141,8 @@ public partial class StartSessionItem : SequenceItem, IValidatable
             Logger.Warning($"[Subframes] Could not read focal length for session start: {ex.Message}");
         }
 
+        var plannedTargets = TsPlannedTargetReader.ReadPlannedTargets();
+
         var request = new StartSessionRequest
         {
             TargetName       = targetName,
@@ -156,6 +158,7 @@ public partial class StartSessionItem : SequenceItem, IValidatable
             SensorWidthPx    = sensorWidthPx,
             SensorHeightPx   = sensorHeightPx,
             FocalLengthMm    = focalLengthMm,
+            PlannedTargets   = plannedTargets,
         };
 
         var sessionId = await _sessionService.StartSessionAsync(request, ct);

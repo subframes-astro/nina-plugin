@@ -66,6 +66,29 @@ public sealed class StartSessionRequest
     [JsonPropertyName("focalLengthMm")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public double? FocalLengthMm { get; init; }
+
+    [JsonPropertyName("plannedTargets")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public List<PlannedTargetInput>? PlannedTargets { get; init; }
+}
+
+/// <summary>A single planned target sourced from Target Scheduler.</summary>
+public sealed class PlannedTargetInput
+{
+    [JsonPropertyName("targetName")]
+    public required string TargetName { get; init; }
+
+    [JsonPropertyName("projectName")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? ProjectName { get; init; }
+
+    [JsonPropertyName("plannedFilters")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public List<string>? PlannedFilters { get; init; }
+
+    [JsonPropertyName("estimatedExposureSec")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public double? EstimatedExposureSec { get; init; }
 }
 
 /// <summary>Body for POST /api/v1/ingest/session/end</summary>
