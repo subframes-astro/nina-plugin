@@ -36,7 +36,10 @@ internal static class TsProgressReader
         {
             var dbPath = GetTsDbPath();
             if (dbPath is null || !File.Exists(dbPath))
+            {
+                Logger.Debug($"[Subframes] TS progress snapshot: DB not found at {dbPath ?? "(null)"} — Target Scheduler not installed or DB path mismatch.");
                 return null;
+            }
 
             var rows = QueryProgress(dbPath);
             if (rows.Count == 0)
@@ -68,7 +71,10 @@ internal static class TsProgressReader
         {
             var dbPath = GetTsDbPath();
             if (dbPath is null || !File.Exists(dbPath))
+            {
+                Logger.Debug($"[Subframes] TS progress delta: DB not found at {dbPath ?? "(null)"} — Target Scheduler not installed or DB path mismatch.");
                 return null;
+            }
 
             var currentMtime = SafeGetMtime(dbPath);
             if (currentMtime == DateTime.MinValue)
