@@ -6,20 +6,116 @@ using Subframes.NinaPlugin.Api;
 namespace Subframes.NinaPlugin;
 
 /// <summary>
-/// Reads all-time project/target progress from the Target Scheduler SQLite database
-/// at session end. Returns one row per (project, target, filter) with desired,
-/// acquired, and accepted counts.
+/// Reads all-time project/target progress from the Target Scheduler SQLite database.
+/// Supports a full snapshot read (for the first station heartbeat) and an incremental
+/// delta read (for subsequent heartbeats) based on SQLite file mtime change detection.
 ///
-/// All access is best-effort: any error returns null so session end is never
-/// blocked by TS availability or schema changes.
+/// All access is best-effort: any error returns null so callers are never blocked
+/// by TS availability or schema changes.
 /// </summary>
 internal static class TsProgressReader
 {
     private const int MaxRows = 500;
 
+    // ── Snapshot/delta state ─────────────────────────────────────────────────
+
+    // Key: (projectName, targetName, filterName); Value: (desired, acquired, accepted)
+    private static Dictionary<(string?, string, string), (int, int, int)>? _lastSnapshot;
+    private static DateTime _lastMtime = DateTime.MinValue;
+
+    // ── Public API ───────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Reads the full TS progress state and caches it for future delta calls.
+    /// Returns null if TS is not installed, the DB is unreadable, or no rows exist.
+    /// Call this on the first station heartbeat after plugin init or reconnection.
+    /// </summary>
+    public static TsProgressSnapshotDto? ReadProgressSnapshot()
+    {
+        try
+        {
+            var dbPath = GetTsDbPath();
+            if (dbPath is null || !File.Exists(dbPath))
+                return null;
+
+            var rows = QueryProgress(dbPath);
+            if (rows.Count == 0)
+                return null;
+
+            var snapshot = ToSnapshotDict(rows);
+            _lastSnapshot = snapshot;
+            _lastMtime = SafeGetMtime(dbPath);
+
+            Logger.Debug($"[Subframes] TS progress snapshot: {rows.Count} row(s).");
+            return new TsProgressSnapshotDto { Rows = ToRowDtos(rows) };
+        }
+        catch (Exception ex)
+        {
+            Logger.Debug($"[Subframes] TS progress snapshot: read skipped ({ex.GetType().Name}: {ex.Message})");
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Checks whether the TS database has changed since the last read (via file mtime).
+    /// If unchanged, returns null immediately (no DB read, zero overhead).
+    /// If changed, re-reads progress, diffs against the previous snapshot, and returns
+    /// the delta (upserts + removals). Returns null if TS is not installed or unreadable.
+    /// </summary>
+    public static TsProgressDeltaDto? ReadProgressDelta()
+    {
+        try
+        {
+            var dbPath = GetTsDbPath();
+            if (dbPath is null || !File.Exists(dbPath))
+                return null;
+
+            var currentMtime = SafeGetMtime(dbPath);
+            if (currentMtime == DateTime.MinValue)
+                return null; // mtime unavailable — skip silently
+
+            if (currentMtime == _lastMtime)
+                return null; // no change
+
+            // File has changed — re-read and diff.
+            var rows = QueryProgress(dbPath);
+            var currentSnapshot = ToSnapshotDict(rows);
+
+            var delta = ComputeDelta(_lastSnapshot, currentSnapshot);
+
+            _lastSnapshot = currentSnapshot;
+            _lastMtime = currentMtime;
+
+            if (delta.Upserts.Count == 0 && delta.Removals.Count == 0)
+            {
+                Logger.Debug("[Subframes] TS progress: mtime changed but no row differences found.");
+                return null;
+            }
+
+            Logger.Debug($"[Subframes] TS progress delta: {delta.Upserts.Count} upsert(s), {delta.Removals.Count} removal(s).");
+            return delta;
+        }
+        catch (Exception ex)
+        {
+            Logger.Debug($"[Subframes] TS progress delta: read skipped ({ex.GetType().Name}: {ex.Message})");
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Resets the mtime and snapshot cache. Call this when the plugin restarts or
+    /// reconnects so the next heartbeat sends a full snapshot.
+    /// </summary>
+    public static void ResetCache()
+    {
+        _lastSnapshot = null;
+        _lastMtime = DateTime.MinValue;
+    }
+
     /// <summary>
     /// Attempts to read all-time progress entries from Target Scheduler.
     /// Returns null (silently) if TS is not installed or the DB is unreadable.
+    /// Used at session end — does not update the heartbeat cache.
     /// </summary>
     public static List<TsProgressInput>? ReadProgress()
     {
@@ -40,10 +136,86 @@ internal static class TsProgressReader
         }
     }
 
+    // ── Private helpers ──────────────────────────────────────────────────────
+
     private static string GetTsDbPath()
     {
         var localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
         return Path.Combine(localAppData, "NINA", "SchedulerPlugin", "schedulerdb.sqlite");
+    }
+
+    private static DateTime SafeGetMtime(string dbPath)
+    {
+        try { return File.GetLastWriteTimeUtc(dbPath); }
+        catch { return DateTime.MinValue; }
+    }
+
+    private static Dictionary<(string?, string, string), (int, int, int)> ToSnapshotDict(List<TsProgressInput> rows)
+    {
+        var dict = new Dictionary<(string?, string, string), (int, int, int)>(rows.Count);
+        foreach (var r in rows)
+            dict[(r.ProjectName, r.TargetName, r.FilterName)] = (r.Desired, r.Acquired, r.Accepted);
+        return dict;
+    }
+
+    private static List<TsProgressRowDto> ToRowDtos(List<TsProgressInput> rows)
+    {
+        var dtos = new List<TsProgressRowDto>(rows.Count);
+        foreach (var r in rows)
+            dtos.Add(new TsProgressRowDto
+            {
+                ProjectName = r.ProjectName,
+                TargetName  = r.TargetName,
+                FilterName  = r.FilterName,
+                Desired     = r.Desired,
+                Acquired    = r.Acquired,
+                Accepted    = r.Accepted,
+            });
+        return dtos;
+    }
+
+    private static TsProgressDeltaDto ComputeDelta(
+        Dictionary<(string?, string, string), (int, int, int)>? previous,
+        Dictionary<(string?, string, string), (int, int, int)> current)
+    {
+        var upserts  = new List<TsProgressRowDto>();
+        var removals = new List<TsProgressRemovalKeyDto>();
+
+        // Upserts: new or changed rows.
+        foreach (var (key, vals) in current)
+        {
+            if (previous is null || !previous.TryGetValue(key, out var prevVals) || prevVals != vals)
+            {
+                upserts.Add(new TsProgressRowDto
+                {
+                    ProjectName = key.Item1,
+                    TargetName  = key.Item2,
+                    FilterName  = key.Item3,
+                    Desired     = vals.Item1,
+                    Acquired    = vals.Item2,
+                    Accepted    = vals.Item3,
+                });
+            }
+        }
+
+        // Removals: rows present in previous but missing in current.
+        if (previous is not null)
+        {
+            foreach (var key in previous.Keys)
+            {
+                if (!current.ContainsKey(key))
+                {
+                    removals.Add(new TsProgressRemovalKeyDto
+                    {
+                        ProjectName = key.Item1,
+                        TargetName  = key.Item2,
+                        FilterName  = key.Item3,
+                    });
+                }
+            }
+        }
+
+        return new TsProgressDeltaDto { Upserts = upserts, Removals = removals };
     }
 
     private static List<TsProgressInput> QueryProgress(string dbPath)

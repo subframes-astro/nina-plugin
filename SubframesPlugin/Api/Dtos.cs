@@ -363,6 +363,76 @@ public sealed class StationHeartbeatRequest
     [JsonPropertyName("location")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public StationLocationDto? Location { get; init; }
+
+    /// <summary>
+    /// Full TS progress snapshot. Sent on the first station heartbeat after plugin init
+    /// or reconnection. Mutually exclusive with <see cref="TsProgressDelta"/>.
+    /// </summary>
+    [JsonPropertyName("tsProgressSnapshot")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public TsProgressSnapshotDto? TsProgressSnapshot { get; init; }
+
+    /// <summary>
+    /// Incremental TS progress diff. Sent only when the TS database has changed since the
+    /// previous heartbeat. Mutually exclusive with <see cref="TsProgressSnapshot"/>.
+    /// </summary>
+    [JsonPropertyName("tsProgressDelta")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public TsProgressDeltaDto? TsProgressDelta { get; init; }
+}
+
+/// <summary>One (project, target, filter) progress row used in snapshots and delta upserts.</summary>
+public sealed class TsProgressRowDto
+{
+    [JsonPropertyName("projectName")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? ProjectName { get; init; }
+
+    [JsonPropertyName("targetName")]
+    public required string TargetName { get; init; }
+
+    [JsonPropertyName("filterName")]
+    public required string FilterName { get; init; }
+
+    [JsonPropertyName("desired")]
+    public int Desired { get; init; }
+
+    [JsonPropertyName("acquired")]
+    public int Acquired { get; init; }
+
+    [JsonPropertyName("accepted")]
+    public int Accepted { get; init; }
+}
+
+/// <summary>Removal key identifying a (project, target, filter) row to delete.</summary>
+public sealed class TsProgressRemovalKeyDto
+{
+    [JsonPropertyName("projectName")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? ProjectName { get; init; }
+
+    [JsonPropertyName("targetName")]
+    public required string TargetName { get; init; }
+
+    [JsonPropertyName("filterName")]
+    public required string FilterName { get; init; }
+}
+
+/// <summary>Full TS progress dump sent on first heartbeat after init or reconnection.</summary>
+public sealed class TsProgressSnapshotDto
+{
+    [JsonPropertyName("rows")]
+    public required List<TsProgressRowDto> Rows { get; init; }
+}
+
+/// <summary>Incremental TS progress diff: rows to upsert and keys to remove.</summary>
+public sealed class TsProgressDeltaDto
+{
+    [JsonPropertyName("upserts")]
+    public required List<TsProgressRowDto> Upserts { get; init; }
+
+    [JsonPropertyName("removals")]
+    public required List<TsProgressRemovalKeyDto> Removals { get; init; }
 }
 
 /// <summary>Equipment info nested in StationHeartbeatRequest.</summary>

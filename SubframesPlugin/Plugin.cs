@@ -67,6 +67,9 @@ public class SubframesPlugin : PluginBase, IPluginManifest, IPartImportsSatisfie
     private CancellationTokenSource? _sequenceRetrySubscribeCts;
     private CancellationTokenSource? _stationHeartbeatCts;
     private Task? _stationHeartbeatTask;
+    // True until the first station heartbeat is sent after init or restart.
+    // Controls whether we send a full TS progress snapshot or an incremental delta.
+    private bool _tsFirstBeat = true;
 
     // DSO container subscription tracking: subscribed during each sequence run,
     // unsubscribed on SequenceFinished / Teardown.
@@ -591,6 +594,9 @@ public class SubframesPlugin : PluginBase, IPluginManifest, IPartImportsSatisfie
     private void StartStationHeartbeat()
     {
         StopStationHeartbeat();
+        // Reset TS progress state so the next heartbeat sends a full snapshot.
+        _tsFirstBeat = true;
+        TsProgressReader.ResetCache();
         var cts = new CancellationTokenSource();
         _stationHeartbeatCts = cts;
         _stationHeartbeatTask = RunStationHeartbeatLoopAsync(cts.Token);
@@ -716,15 +722,37 @@ public class SubframesPlugin : PluginBase, IPluginManifest, IPartImportsSatisfie
         }
         catch { /* safety monitor not available */ }
 
+        // Include TS progress: full snapshot on first beat, delta on subsequent beats.
+        TsProgressSnapshotDto? tsSnapshot = null;
+        TsProgressDeltaDto? tsDelta = null;
+        try
+        {
+            if (_tsFirstBeat)
+            {
+                tsSnapshot = TsProgressReader.ReadProgressSnapshot();
+                _tsFirstBeat = false;
+            }
+            else
+            {
+                tsDelta = TsProgressReader.ReadProgressDelta();
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.Debug($"[Subframes] Station heartbeat: TS progress skipped ({ex.GetType().Name}: {ex.Message})");
+        }
+
         return new StationHeartbeatRequest
         {
-            InstanceId    = string.IsNullOrWhiteSpace(_options.InstanceId) ? null : _options.InstanceId,
-            InstanceName  = string.IsNullOrWhiteSpace(_options.InstanceName) ? null : _options.InstanceName,
-            Status        = status,
-            PluginVersion = Assembly.GetExecutingAssembly().GetName().Version?.ToString(),
-            IsSafe        = isSafe,
-            Equipment     = equipment,
-            Location      = location,
+            InstanceId        = string.IsNullOrWhiteSpace(_options.InstanceId) ? null : _options.InstanceId,
+            InstanceName      = string.IsNullOrWhiteSpace(_options.InstanceName) ? null : _options.InstanceName,
+            Status            = status,
+            PluginVersion     = Assembly.GetExecutingAssembly().GetName().Version?.ToString(),
+            IsSafe            = isSafe,
+            Equipment         = equipment,
+            Location          = location,
+            TsProgressSnapshot = tsSnapshot,
+            TsProgressDelta   = tsDelta,
         };
     }
 
