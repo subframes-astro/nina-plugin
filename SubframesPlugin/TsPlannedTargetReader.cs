@@ -1,3 +1,4 @@
+using System.IO;
 using Microsoft.Data.Sqlite;
 using NINA.Core.Utility;
 using Subframes.NinaPlugin.Api;
