@@ -533,6 +533,31 @@ public sealed class IngestFramesData
     public int TotalFrames { get; init; }
 }
 
+/// <summary>Body for POST /api/v1/ingest/session/{id}/ts-grading</summary>
+public sealed class TsGradingRequest
+{
+    [JsonPropertyName("entries")]
+    public required List<TsGradingInput> Entries { get; init; }
+}
+
+/// <summary>One frame grading result from Target Scheduler.</summary>
+public sealed class TsGradingInput
+{
+    [JsonPropertyName("filterName")]
+    public required string FilterName { get; init; }
+
+    [JsonPropertyName("timestamp")]
+    public required string Timestamp { get; init; }
+
+    /// <summary>TS convention: -1 = ungraded, 0 = rejected, 1 = accepted.</summary>
+    [JsonPropertyName("gradingStatus")]
+    public int GradingStatus { get; init; }
+
+    [JsonPropertyName("rejectReason")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? RejectReason { get; init; }
+}
+
 /// <summary>Body for POST /api/v1/ingest/event</summary>
 public sealed class EventRequest
 {
