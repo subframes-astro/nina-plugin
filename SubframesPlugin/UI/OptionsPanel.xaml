@@ -121,7 +121,7 @@
             Foreground="{DynamicResource PrimaryBrush}" />
         <TextBox
             Text="{Binding TsApiPort, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
-            ToolTip="Target Scheduler local HTTP API port (default: 60555)"
+            ToolTip="Target Scheduler local HTTP API port (default: 8188)"
             Margin="0,0,0,12" />
 
         <!-- TS Database Path -->
