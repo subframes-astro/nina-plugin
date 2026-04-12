@@ -236,22 +236,19 @@ internal static class TsProgressReader
         using var cmd = conn.CreateCommand();
         cmd.CommandText = """
             SELECT
-                p.Name           AS projectName,
-                t.Name           AS targetName,
-                ep.FilterName    AS filterName,
+                p.Name            AS projectName,
+                t.Name            AS targetName,
+                et.filtername     AS filterName,
                 COALESCE(ep.Desired,  0) AS desired,
                 COALESCE(ep.Accepted, 0) AS accepted,
-                COALESCE((
-                    SELECT COUNT(*)
-                    FROM acquiredimage ai
-                    WHERE ai.ExposurePlanId = ep.Id
-                ), 0) AS acquired
+                COALESCE(ep.Acquired, 0) AS acquired
             FROM ExposurePlan ep
-            JOIN Target  t ON t.Id = ep.TargetId
-            JOIN Project p ON p.Id = t.ProjectId
+            JOIN Target            t  ON t.Id  = ep.targetid
+            JOIN Project           p  ON p.Id  = t.projectid
+            JOIN exposuretemplate  et ON et.Id  = ep.exposureTemplateId
             WHERE p.State   = 1
-              AND t.Enabled = 1
-            ORDER BY p.Name, t.Name, ep.FilterName
+              AND t.active  = 1
+            ORDER BY p.Name, t.Name, et.filtername
             LIMIT @limit
             """;
         cmd.Parameters.AddWithValue("@limit", MaxRows);

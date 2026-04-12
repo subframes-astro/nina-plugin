@@ -57,15 +57,16 @@ internal static class TsPlannedTargetReader
         using var cmd = conn.CreateCommand();
         cmd.CommandText = """
             SELECT
-                t.Name        AS targetName,
-                p.Name        AS projectName,
-                ep.FilterName AS filterName,
-                ep.ExposureLength AS exposureSec
+                t.Name          AS targetName,
+                p.Name          AS projectName,
+                et.filtername   AS filterName,
+                ep.exposure     AS exposureSec
             FROM Target t
-            JOIN Project     p  ON p.Id  = t.ProjectId
-            LEFT JOIN ExposurePlan ep ON ep.TargetId = t.Id
+            JOIN Project          p  ON p.Id  = t.projectid
+            LEFT JOIN ExposurePlan ep ON ep.targetid = t.Id
+            LEFT JOIN exposuretemplate et ON et.Id = ep.exposureTemplateId
             WHERE p.State  = 1
-              AND t.Enabled = 1
+              AND t.active = 1
               AND (ep.Desired IS NULL OR ep.Desired < 0 OR ep.Accepted < ep.Desired)
             ORDER BY p.Name, t.Name
             LIMIT @limit
