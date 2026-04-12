@@ -480,12 +480,10 @@ public sealed class TsPreviewBlockDto
     public bool WaitPeriod { get; init; }
 
     [JsonPropertyName("startTime")]
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public string? StartTime { get; init; }
+    public required string StartTime { get; init; }
 
     [JsonPropertyName("endTime")]
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    public string? EndTime { get; init; }
+    public required string EndTime { get; init; }
 
     /// <summary>Null for wait-period blocks.</summary>
     [JsonPropertyName("exposurePlans")]

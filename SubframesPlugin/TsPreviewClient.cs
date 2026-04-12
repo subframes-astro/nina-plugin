@@ -75,22 +75,27 @@ internal sealed class TsPreviewClient
             var rawBlocks = JsonSerializer.Deserialize<List<TsPreviewBlockRaw>>(json, _jsonOptions);
             if (rawBlocks is null) return null;
 
-            var blocks = rawBlocks.Select(b => new TsPreviewBlockDto
-            {
-                TargetId = string.IsNullOrEmpty(b.Id) ? null : b.Id,
-                TargetName = b.Name ?? string.Empty,
-                WaitPeriod = b.WaitPeriod,
-                StartTime = b.StartTime,
-                EndTime = b.EndTime,
-                ExposurePlans = b.ExposurePlan is { Count: > 0 }
-                    ? b.ExposurePlan.Select(ep => new TsPreviewExposurePlanDto
-                    {
-                        FilterName = ep.FilterName ?? string.Empty,
-                        Exposure = ep.Exposure,
-                        Count = ep.Count,
-                    }).ToList()
-                    : null,
-            }).ToList();
+            // Filter out any blocks missing StartTime or EndTime — the backend requires both fields.
+            // Well-behaved TS responses always include times for every block (including wait periods),
+            // so this guard is purely defensive against malformed data.
+            var blocks = rawBlocks
+                .Where(b => b.StartTime is not null && b.EndTime is not null)
+                .Select(b => new TsPreviewBlockDto
+                {
+                    TargetId = string.IsNullOrEmpty(b.Id) ? null : b.Id,
+                    TargetName = b.Name ?? string.Empty,
+                    WaitPeriod = b.WaitPeriod,
+                    StartTime = b.StartTime!,
+                    EndTime = b.EndTime!,
+                    ExposurePlans = b.ExposurePlan is { Count: > 0 }
+                        ? b.ExposurePlan.Select(ep => new TsPreviewExposurePlanDto
+                        {
+                            FilterName = ep.FilterName ?? string.Empty,
+                            Exposure = ep.Exposure,
+                            Count = ep.Count,
+                        }).ToList()
+                        : null,
+                }).ToList();
 
             return new TsPreviewDto
             {
@@ -138,7 +143,7 @@ internal sealed class TsPreviewClient
 }
 
 /// <summary>A Target Scheduler profile as returned by GET /ts/v0/profiles.</summary>
-internal sealed class TsProfileInfo
+public sealed class TsProfileInfo
 {
     public string Id { get; init; } = string.Empty;
     public string Name { get; init; } = string.Empty;
