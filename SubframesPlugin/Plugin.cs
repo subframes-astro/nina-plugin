@@ -70,6 +70,7 @@ public class SubframesPlugin : PluginBase, IPluginManifest, IPartImportsSatisfie
     // True until the first station heartbeat is sent after init or restart.
     // Controls whether we send a full TS progress snapshot or an incremental delta.
     private bool _tsFirstBeat = true;
+    private TargetSchedulerDetector? _tsDetector;
 
     // DSO container subscription tracking: subscribed during each sequence run,
     // unsubscribed on SequenceFinished / Teardown.
@@ -131,6 +132,8 @@ public class SubframesPlugin : PluginBase, IPluginManifest, IPartImportsSatisfie
         _weatherDataMediator = weatherDataMediator;
         _frameCache = new FrameCache();
         _syncEngine = new SyncEngine(_frameCache, _apiClient, _options);
+        _tsDetector = new TargetSchedulerDetector(_options.TsApiPort);
+        TsHelper.Configure(_options.TsDatabasePath);
         _sessionService = new SessionService(imageSaveMediator, _apiClient, _options, _frameCache, _syncEngine, safetyMonitorMediator, guiderMediator, weatherDataMediator, rotatorMediator, telescopeMediator, focuserMediator);
         _sessionService.SessionStarted += OnSessionStarted;
         _optionsVm = new OptionsPanelViewModel(this);
@@ -248,6 +251,14 @@ public class SubframesPlugin : PluginBase, IPluginManifest, IPartImportsSatisfie
     {
         if (!_isPrimary) return; // Secondary instances don't own background tasks.
 
+        // Re-apply TS configuration (port or DB path may have changed).
+        TsHelper.Configure(_options.TsDatabasePath);
+        if (_tsDetector is not null && _tsDetector.Port != _options.TsApiPort)
+        {
+            _tsDetector.Dispose();
+            _tsDetector = new TargetSchedulerDetector(_options.TsApiPort);
+        }
+
         if (_options.IsEnabled && !string.IsNullOrWhiteSpace(_options.ApiKey))
         {
             StartStationHeartbeat();
@@ -282,6 +293,8 @@ public class SubframesPlugin : PluginBase, IPluginManifest, IPartImportsSatisfie
             _sessionService.SessionStarted -= OnSessionStarted;
             UnsubscribeFromContainerEvents();
             StopStationHeartbeat();
+            _tsDetector?.Dispose();
+            _tsDetector = null;
             _syncEngine.Dispose();
             _sessionService.Dispose();
             _frameCache.Dispose();
@@ -597,6 +610,7 @@ public class SubframesPlugin : PluginBase, IPluginManifest, IPartImportsSatisfie
         // Reset TS progress state so the next heartbeat sends a full snapshot.
         _tsFirstBeat = true;
         TsProgressReader.ResetCache();
+        _tsDetector?.Start();
         var cts = new CancellationTokenSource();
         _stationHeartbeatCts = cts;
         _stationHeartbeatTask = RunStationHeartbeatLoopAsync(cts.Token);
@@ -608,6 +622,7 @@ public class SubframesPlugin : PluginBase, IPluginManifest, IPartImportsSatisfie
         _stationHeartbeatCts?.Dispose();
         _stationHeartbeatCts = null;
         _stationHeartbeatTask = null;
+        _tsDetector?.Stop();
     }
 
     private async Task RunStationHeartbeatLoopAsync(CancellationToken ct)
@@ -744,15 +759,16 @@ public class SubframesPlugin : PluginBase, IPluginManifest, IPartImportsSatisfie
 
         return new StationHeartbeatRequest
         {
-            InstanceId        = string.IsNullOrWhiteSpace(_options.InstanceId) ? null : _options.InstanceId,
-            InstanceName      = string.IsNullOrWhiteSpace(_options.InstanceName) ? null : _options.InstanceName,
-            Status            = status,
-            PluginVersion     = Assembly.GetExecutingAssembly().GetName().Version?.ToString(),
-            IsSafe            = isSafe,
-            Equipment         = equipment,
-            Location          = location,
-            TsProgressSnapshot = tsSnapshot,
-            TsProgressDelta   = tsDelta,
+            InstanceId          = string.IsNullOrWhiteSpace(_options.InstanceId) ? null : _options.InstanceId,
+            InstanceName        = string.IsNullOrWhiteSpace(_options.InstanceName) ? null : _options.InstanceName,
+            Status              = status,
+            PluginVersion       = Assembly.GetExecutingAssembly().GetName().Version?.ToString(),
+            IsSafe              = isSafe,
+            Equipment           = equipment,
+            Location            = location,
+            TsProgressSnapshot  = tsSnapshot,
+            TsProgressDelta     = tsDelta,
+            TsAvailabilityState = _tsDetector?.CurrentState,
         };
     }
 

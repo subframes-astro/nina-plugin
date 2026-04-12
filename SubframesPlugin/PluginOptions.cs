@@ -55,6 +55,20 @@ public class PluginOptions
     /// <summary>Minutes of inactivity after which an auto-session is ended (default 30).</summary>
     public int SessionTimeoutMinutes { get; set; } = 30;
 
+    // ── Target Scheduler ─────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Port for the Target Scheduler local HTTP API (default 60555).
+    /// Used to probe TS availability state.
+    /// </summary>
+    public int TsApiPort { get; set; } = 60555;
+
+    /// <summary>
+    /// Absolute path to the Target Scheduler SQLite database.
+    /// Leave empty to use the default: <c>%localappdata%\NINA\TargetScheduler\targetscheduler.db</c>.
+    /// </summary>
+    public string TsDatabasePath { get; set; } = string.Empty;
+
     // ── Persistence ──────────────────────────────────────────────────────────
 
     /// <summary>Load settings from disk, or return defaults if not present.</summary>

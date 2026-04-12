@@ -379,6 +379,15 @@ public sealed class StationHeartbeatRequest
     [JsonPropertyName("tsProgressDelta")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public TsProgressDeltaDto? TsProgressDelta { get; init; }
+
+    /// <summary>
+    /// Target Scheduler availability state: <c>"none"</c> (not installed) |
+    /// <c>"no_api"</c> (installed, API disabled) | <c>"active"</c> (installed, API enabled).
+    /// Sent on every heartbeat.
+    /// </summary>
+    [JsonPropertyName("tsAvailabilityState")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? TsAvailabilityState { get; init; }
 }
 
 /// <summary>One (project, target, filter) progress row used in snapshots and delta upserts.</summary>
