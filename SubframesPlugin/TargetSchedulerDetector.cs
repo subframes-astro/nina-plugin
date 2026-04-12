@@ -27,8 +27,8 @@ internal sealed class TargetSchedulerDetector : IDisposable
     private CancellationTokenSource? _cts;
     private Task? _probeLoopTask;
 
-    /// <param name="port">TS local HTTP API port (default 60555).</param>
-    public TargetSchedulerDetector(int port = 60555)
+    /// <param name="port">TS local HTTP API port (default 8188).</param>
+    public TargetSchedulerDetector(int port = 8188)
     {
         _port = port;
     }
@@ -151,7 +151,7 @@ internal sealed class TargetSchedulerDetector : IDisposable
         var newState = "no_api";
         try
         {
-            var url = $"http://localhost:{_port}/targetscheduler/api/version";
+            var url = $"http://localhost:{_port}/ts/v0/version";
             var response = await _http.GetAsync(url, ct).ConfigureAwait(false);
             if (response.IsSuccessStatusCode)
                 newState = "active";

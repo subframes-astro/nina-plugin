@@ -58,10 +58,10 @@ public class PluginOptions
     // ── Target Scheduler ─────────────────────────────────────────────────────
 
     /// <summary>
-    /// Port for the Target Scheduler local HTTP API (default 60555).
+    /// Port for the Target Scheduler local HTTP API (default 8188).
     /// Used to probe TS availability state.
     /// </summary>
-    public int TsApiPort { get; set; } = 60555;
+    public int TsApiPort { get; set; } = 8188;
 
     /// <summary>
     /// Absolute path to the Target Scheduler SQLite database.
@@ -81,11 +81,20 @@ public class PluginOptions
                 var json = File.ReadAllText(SettingsPath);
                 var opts = JsonSerializer.Deserialize<PluginOptions>(json, SerializerOptions)
                            ?? new PluginOptions();
+                var dirty = false;
                 if (string.IsNullOrEmpty(opts.InstanceId))
                 {
                     opts.InstanceId = Guid.NewGuid().ToString();
-                    opts.Save();
+                    dirty = true;
                 }
+                // Migrate from the incorrect default port (60555) to the correct TS API port (8188).
+                if (opts.TsApiPort == 60555)
+                {
+                    opts.TsApiPort = 8188;
+                    dirty = true;
+                }
+                if (dirty)
+                    opts.Save();
                 return opts;
             }
         }
