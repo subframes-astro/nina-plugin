@@ -57,6 +57,9 @@ internal sealed class TargetSchedulerDetector : IDisposable
             return;
         }
 
+        // TS is installed — set "no_api" immediately so the first heartbeat
+        // never reports "none" while the async probe is still in-flight.
+        _currentState = "no_api";
         Logger.Debug("[Subframes] TargetSchedulerDetector: TS assembly found — starting HTTP probe loop.");
         var cts = new CancellationTokenSource();
         _cts = cts;
