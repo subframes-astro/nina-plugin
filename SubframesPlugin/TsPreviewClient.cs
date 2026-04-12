@@ -27,8 +27,8 @@ internal sealed class TsPreviewClient
 
     private readonly int _port;
 
-    /// <param name="port">TS local HTTP API port (default 60555).</param>
-    public TsPreviewClient(int port = 60555)
+    /// <param name="port">TS local HTTP API port (default 8188).</param>
+    public TsPreviewClient(int port = 8188)
     {
         _port = port;
     }
@@ -46,10 +46,15 @@ internal sealed class TsPreviewClient
             var profiles = JsonSerializer.Deserialize<List<TsProfileInfoRaw>>(json, _jsonOptions);
             if (profiles is null) return [];
 
-            return profiles
+            var result = profiles
                 .Select(p => new TsProfileInfo { Id = p.Id ?? string.Empty, Name = p.Name ?? string.Empty, Active = p.Active })
                 .Where(p => !string.IsNullOrEmpty(p.Id))
                 .ToList();
+
+            if (result.Count == 0)
+                Logger.Warning($"[Subframes] TsPreviewClient.FetchProfilesAsync: TS returned an empty profiles list (port={_port}).");
+
+            return result;
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
@@ -57,7 +62,7 @@ internal sealed class TsPreviewClient
         }
         catch (Exception ex)
         {
-            Logger.Debug($"[Subframes] TsPreviewClient.FetchProfilesAsync error: {ex.GetType().Name}: {ex.Message}");
+            Logger.Warning($"[Subframes] TsPreviewClient.FetchProfilesAsync failed: {ex.GetType().Name}: {ex.Message}");
             return [];
         }
     }
@@ -110,7 +115,7 @@ internal sealed class TsPreviewClient
         }
         catch (Exception ex)
         {
-            Logger.Debug($"[Subframes] TsPreviewClient.FetchPreviewAsync error: {ex.GetType().Name}: {ex.Message}");
+            Logger.Warning($"[Subframes] TsPreviewClient.FetchPreviewAsync failed for profile '{profileName}' ({profileId}): {ex.GetType().Name}: {ex.Message}");
             return null;
         }
     }
