@@ -627,7 +627,32 @@ public class SubframesPlugin : PluginBase, IPluginManifest, IPartImportsSatisfie
 
     private async Task RunStationHeartbeatLoopAsync(CancellationToken ct)
     {
-        // Immediate heartbeat on startup.
+        // If TS was not detected during initial startup, wait for NINA to
+        // finish loading all plugins and retry.  Subframes often loads before
+        // Target Scheduler, so the assembly-presence check sees nothing on the
+        // first pass.  A 5-second grace period covers typical load-order gaps
+        // (observed ~600 ms) with generous margin for slower machines.
+        if (_tsDetector?.CurrentState == "none")
+        {
+            Logger.Info("[Subframes] TS not detected at startup — deferring first heartbeat to allow plugin load to complete.");
+            try
+            {
+                await Task.Delay(TimeSpan.FromSeconds(5), ct).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) { return; }
+
+            _tsDetector.Start();
+
+            // Give the HTTP probe (2 s timeout) time to reach the TS API so the
+            // first heartbeat can report "active" instead of "no_api".
+            try
+            {
+                await Task.Delay(TimeSpan.FromSeconds(3), ct).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) { return; }
+        }
+
+        // First heartbeat — TS state should now be accurate.
         _ = _apiClient.SendStationHeartbeatAsync(BuildStationHeartbeatRequest(), CancellationToken.None);
 
         using var timer = new PeriodicTimer(TimeSpan.FromSeconds(300));
