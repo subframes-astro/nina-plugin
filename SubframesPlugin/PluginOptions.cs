@@ -58,10 +58,10 @@ public class PluginOptions
     // ── Target Scheduler ─────────────────────────────────────────────────────
 
     /// <summary>
-    /// Port for the Target Scheduler local HTTP API (default 60555).
+    /// Port for the Target Scheduler local HTTP API (default 8188).
     /// Used to probe TS availability state.
     /// </summary>
-    public int TsApiPort { get; set; } = 60555;
+    public int TsApiPort { get; set; } = 8188;
 
     /// <summary>
     /// Absolute path to the Target Scheduler SQLite database.
