@@ -142,6 +142,10 @@ public partial class StartSessionItem : SequenceItem, IValidatable
         }
 
         var plannedTargets = TsPlannedTargetReader.ReadPlannedTargets();
+        if (plannedTargets is not null)
+            Logger.Info($"[Subframes] Including {plannedTargets.Count} planned target(s) from Target Scheduler in session start");
+        else
+            Logger.Info("[Subframes] No Target Scheduler planned targets to include in session start");
 
         var request = new StartSessionRequest
         {

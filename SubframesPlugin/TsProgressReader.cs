@@ -34,10 +34,10 @@ internal static class TsProgressReader
     {
         try
         {
-            var dbPath = GetTsDbPath();
+            var dbPath = TsHelper.GetTsDbPath();
             if (dbPath is null || !File.Exists(dbPath))
             {
-                Logger.Debug($"[Subframes] TS progress snapshot: DB not found at {dbPath ?? "(null)"} — Target Scheduler not installed or DB path mismatch.");
+                Logger.Info($"[Subframes] TS progress snapshot: DB not found at {dbPath ?? "(null)"} — Target Scheduler not installed or DB path mismatch.");
                 return null;
             }
 
@@ -49,12 +49,12 @@ internal static class TsProgressReader
             _lastSnapshot = snapshot;
             _lastMtime = SafeGetMtime(dbPath);
 
-            Logger.Debug($"[Subframes] TS progress snapshot: {rows.Count} row(s).");
+            Logger.Info($"[Subframes] TS progress snapshot: {rows.Count} row(s).");
             return new TsProgressSnapshotDto { Rows = ToRowDtos(rows) };
         }
         catch (Exception ex)
         {
-            Logger.Debug($"[Subframes] TS progress snapshot: read skipped ({ex.GetType().Name}: {ex.Message})");
+            Logger.Warning($"[Subframes] TS progress snapshot: read skipped ({ex.GetType().Name}: {ex.Message})");
             return null;
         }
     }
@@ -69,10 +69,10 @@ internal static class TsProgressReader
     {
         try
         {
-            var dbPath = GetTsDbPath();
+            var dbPath = TsHelper.GetTsDbPath();
             if (dbPath is null || !File.Exists(dbPath))
             {
-                Logger.Debug($"[Subframes] TS progress delta: DB not found at {dbPath ?? "(null)"} — Target Scheduler not installed or DB path mismatch.");
+                Logger.Info($"[Subframes] TS progress delta: DB not found at {dbPath ?? "(null)"} — Target Scheduler not installed or DB path mismatch.");
                 return null;
             }
 
@@ -94,16 +94,16 @@ internal static class TsProgressReader
 
             if (delta.Upserts.Count == 0 && delta.Removals.Count == 0)
             {
-                Logger.Debug("[Subframes] TS progress: mtime changed but no row differences found.");
+                Logger.Info("[Subframes] TS progress: mtime changed but no row differences found.");
                 return null;
             }
 
-            Logger.Debug($"[Subframes] TS progress delta: {delta.Upserts.Count} upsert(s), {delta.Removals.Count} removal(s).");
+            Logger.Info($"[Subframes] TS progress delta: {delta.Upserts.Count} upsert(s), {delta.Removals.Count} removal(s).");
             return delta;
         }
         catch (Exception ex)
         {
-            Logger.Debug($"[Subframes] TS progress delta: read skipped ({ex.GetType().Name}: {ex.Message})");
+            Logger.Warning($"[Subframes] TS progress delta: read skipped ({ex.GetType().Name}: {ex.Message})");
             return null;
         }
     }
@@ -127,28 +127,25 @@ internal static class TsProgressReader
     {
         try
         {
-            var dbPath = GetTsDbPath();
+            var dbPath = TsHelper.GetTsDbPath();
             if (dbPath is null || !File.Exists(dbPath))
+            {
+                Logger.Info($"[Subframes] Target Scheduler not detected (no database at {dbPath})");
                 return null;
+            }
 
             var entries = QueryProgress(dbPath);
-            Logger.Debug($"[Subframes] TS progress: found {entries.Count} row(s).");
+            Logger.Info($"[Subframes] TS progress: found {entries.Count} row(s).");
             return entries.Count > 0 ? entries : null;
         }
         catch (Exception ex)
         {
-            Logger.Debug($"[Subframes] TS progress: read skipped ({ex.GetType().Name}: {ex.Message})");
+            Logger.Warning($"[Subframes] TS progress: read skipped ({ex.GetType().Name}: {ex.Message})");
             return null;
         }
     }
 
     // ── Private helpers ──────────────────────────────────────────────────────
-
-    private static string GetTsDbPath()
-    {
-        var localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
-        return Path.Combine(localAppData, "NINA", "SchedulerPlugin", "schedulerdb.sqlite");
-    }
 
     private static DateTime SafeGetMtime(string dbPath)
     {
@@ -223,6 +220,7 @@ internal static class TsProgressReader
 
         return new TsProgressDeltaDto { Upserts = upserts, Removals = removals };
     }
+
 
     private static List<TsProgressInput> QueryProgress(string dbPath)
     {

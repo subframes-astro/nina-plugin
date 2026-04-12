@@ -24,25 +24,22 @@ internal static class TsGradingReader
     {
         try
         {
-            var dbPath = GetTsDbPath();
+            var dbPath = TsHelper.GetTsDbPath();
             if (dbPath is null || !File.Exists(dbPath))
+            {
+                Logger.Info($"[Subframes] Target Scheduler not detected (no database at {dbPath})");
                 return null;
+            }
 
             var entries = QueryGradingEntries(dbPath, sessionStart, sessionEnd);
-            Logger.Debug($"[Subframes] TS grading: found {entries.Count} entry/entries in session window.");
+            Logger.Info($"[Subframes] TS grading: found {entries.Count} entry/entries in session window.");
             return entries.Count > 0 ? entries : null;
         }
         catch (Exception ex)
         {
-            Logger.Debug($"[Subframes] TS grading: read skipped ({ex.GetType().Name}: {ex.Message})");
+            Logger.Warning($"[Subframes] TS grading: read skipped ({ex.GetType().Name}: {ex.Message})");
             return null;
         }
-    }
-
-    private static string GetTsDbPath()
-    {
-        var localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
-        return Path.Combine(localAppData, "NINA", "SchedulerPlugin", "schedulerdb.sqlite");
     }
 
     private static List<TsGradingInput> QueryGradingEntries(
