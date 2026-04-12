@@ -107,6 +107,18 @@ internal sealed class TargetSchedulerDetector : IDisposable
             Logger.Debug($"[Subframes] TargetSchedulerDetector: filesystem check error: {ex.Message}");
         }
 
+        // Database fallback: if the TS database file exists, TS is installed.
+        try
+        {
+            var dbPath = TsHelper.GetTsDbPath();
+            if (File.Exists(dbPath))
+                return true;
+        }
+        catch (Exception ex)
+        {
+            Logger.Debug($"[Subframes] TargetSchedulerDetector: DB path check error: {ex.Message}");
+        }
+
         return false;
     }
 
