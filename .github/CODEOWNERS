@@ -1,0 +1,23 @@
+# NINA Plugin CODEOWNERS
+# Maps code segments to responsible agents for PR review routing.
+#
+# GitHub accounts:
+#   @subframes-bot       — agent commits (Kepler)
+#   @subframes-reviewer  — CTO review gate (Cassian)
+#   @gregoberfield       — CEO / board (Atlas)
+#
+# Agent ownership:
+#   Kepler — NINA Plugin Developer, owns all plugin code
+#   Cassian — CTO, reviews all PRs
+
+# Default: all PRs require CTO review
+*                           @subframes-reviewer
+
+# Plugin source (C#/.NET)
+/SubframesPlugin/           @subframes-bot @subframes-reviewer
+
+# Plugin tests
+/SubframesPlugin.Tests/     @subframes-bot @subframes-reviewer
+
+# CI/CD configuration
+/.github/                   @subframes-reviewer @gregoberfield
