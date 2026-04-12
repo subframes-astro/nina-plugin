@@ -56,6 +56,12 @@ public partial class OptionsPanelViewModel : ObservableObject
     [ObservableProperty]
     private bool _isCheckingApi;
 
+    [ObservableProperty]
+    private int _tsApiPort;
+
+    [ObservableProperty]
+    private string _tsDatabasePath = string.Empty;
+
     public OptionsPanelViewModel(SubframesPlugin plugin)
     {
         _plugin = plugin;
@@ -70,6 +76,8 @@ public partial class OptionsPanelViewModel : ObservableObject
         IsDebugEnabled = _options.IsDebugEnabled;
         InstanceId = _options.InstanceId;
         InstanceName = _options.InstanceName;
+        TsApiPort = _options.TsApiPort;
+        TsDatabasePath = _options.TsDatabasePath;
 
         RefreshStatus();
     }
@@ -84,6 +92,8 @@ public partial class OptionsPanelViewModel : ObservableObject
         _options.IsEnabled = IsEnabled;
         _options.IsDebugEnabled = IsDebugEnabled;
         _options.InstanceName = InstanceName.Trim();
+        _options.TsApiPort = TsApiPort;
+        _options.TsDatabasePath = TsDatabasePath.Trim();
         _options.Save();
         _plugin.ApplyOptionsChange();
         StatusMessage = "Settings saved.";

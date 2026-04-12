@@ -104,6 +104,36 @@
             ToolTip="Friendly name for this NINA instance (e.g. Main Scope, Widefield Rig)"
             Margin="0,0,0,12" />
 
+        <!-- Target Scheduler Settings -->
+        <Separator Margin="0,8,0,8" />
+
+        <TextBlock
+            Text="Target Scheduler Settings"
+            FontWeight="SemiBold"
+            FontSize="13"
+            Margin="0,0,0,8"
+            Foreground="{DynamicResource PrimaryBrush}" />
+
+        <!-- TS API Port -->
+        <TextBlock
+            Text="TS API Port"
+            Margin="0,0,0,4"
+            Foreground="{DynamicResource PrimaryBrush}" />
+        <TextBox
+            Text="{Binding TsApiPort, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+            ToolTip="Target Scheduler local HTTP API port (default: 60555)"
+            Margin="0,0,0,12" />
+
+        <!-- TS Database Path -->
+        <TextBlock
+            Text="TS Database Path"
+            Margin="0,0,0,4"
+            Foreground="{DynamicResource PrimaryBrush}" />
+        <TextBox
+            Text="{Binding TsDatabasePath, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+            ToolTip="Path to targetscheduler.db — leave blank for default: %localappdata%\NINA\TargetScheduler\targetscheduler.db"
+            Margin="0,0,0,12" />
+
         <!-- Save button -->
         <Button
             Content="Save Settings"
