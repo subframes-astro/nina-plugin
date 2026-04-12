@@ -1,4 +1,6 @@
 using System.IO;
+using System.Reflection;
+using System.Runtime.CompilerServices;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using NINA.Core.Model;
@@ -62,16 +64,55 @@ public sealed class SessionService : IDisposable, IFocuserConsumer
     // Exposure yield counters — thread-safe via Interlocked.
     // Remain null until a detection mechanism is wired up; null means "not tracked"
     // so the backend omits these fields rather than showing incorrect zeros.
-    // TODO: subscribe to a NINA failure/skip event and call IncrementSkippedExposures /
-    // IncrementFailedExposures once NINA SDK exposes a reliable hook.
     private int _skippedExposures;
     private int _failedExposures;
     private volatile bool _trackingExposureYield;
+
+    // Exposure yield polling — 1-second timer polls sequencer for LIGHT frame skip/fail transitions.
+    private Timer? _yieldPollTimer;
+    private Dictionary<int, string>? _prevItemStatuses;
 
     private sealed record HeartbeatSnapshot(string? Filter, double? LatestHfr, double? LatestRmsTotal);
 
     /// <summary>Replace non-finite doubles (NaN, ±Infinity) with null so JSON serialization never throws.</summary>
     private static double? Finite(double? v) => v is double d && double.IsFinite(d) ? v : null;
+
+    // ── Hocus Focus reflection cache ─────────────────────────────────────────
+    // FWHM and Eccentricity are not on IStarDetectionAnalysis in stock NINA 3.x;
+    // they only exist on concrete implementations (e.g. Hocus Focus plugin).
+    // We resolve the PropertyInfo once and cache it to avoid per-frame overhead.
+    private static PropertyInfo? _fwhmProp;
+    private static PropertyInfo? _eccentricityProp;
+    private static bool _fwhmResolved;
+    private static bool _eccentricityResolved;
+
+    /// <summary>
+    /// Reads a <c>double</c> property from <paramref name="obj"/> by reflection, trying each
+    /// candidate <paramref name="names"/> in order. The resolved <see cref="PropertyInfo"/> is
+    /// cached in <paramref name="cached"/> after the first call so subsequent calls are O(1).
+    /// Returns <c>null</c> when the object is null, when no matching property exists, or when
+    /// the value is not a <c>double</c>.
+    /// </summary>
+    private static double? ReadReflectedDouble(object? obj, ref PropertyInfo? cached, ref bool resolved, params string[] names)
+    {
+        if (obj == null) return null;
+        if (!resolved)
+        {
+            var type = obj.GetType();
+            foreach (var name in names)
+            {
+                cached = type.GetProperty(name, BindingFlags.Public | BindingFlags.Instance);
+                if (cached != null) break;
+            }
+            resolved = true;
+            Logger.Debug(cached != null
+                ? $"[Subframes] Reflection: found property '{cached.Name}' on {type.Name} for FWHM/Eccentricity."
+                : $"[Subframes] Reflection: no FWHM/Eccentricity property found on {type.Name} — fields will be null.");
+        }
+        if (cached == null) return null;
+        var val = cached.GetValue(obj);
+        return val is double d ? d : null;
+    }
 
     /// <summary>Returns the safety monitor's IsSafe value when connected, or null if unavailable.</summary>
     private bool? ReadIsSafe()
@@ -170,6 +211,7 @@ public sealed class SessionService : IDisposable, IFocuserConsumer
             _snapshot = new HeartbeatSnapshot(null, null, null);
             _sessionStartTime = DateTime.UtcNow;
             StartHeartbeatTimer(sessionId);
+            StartYieldPollTimer();
             SessionStarted?.Invoke(this, EventArgs.Empty);
             RegisterSessionEventConsumers();
         }
@@ -478,14 +520,17 @@ public sealed class SessionService : IDisposable, IFocuserConsumer
             var hasTarget = !string.IsNullOrWhiteSpace(targetName) && !(targetRa == 0 && targetDec == 0);
             var resolvedTarget = hasTarget ? targetName! : string.Empty;
 
+            var plannedTargets = TsPlannedTargetReader.ReadPlannedTargets();
+
             var request = new StartSessionRequest
             {
-                TargetName   = resolvedTarget,
-                TargetRa     = targetRa,
-                TargetDec    = targetDec,
-                StartTime    = DateTime.UtcNow.ToString("o"),
-                InstanceId   = string.IsNullOrWhiteSpace(options.InstanceId) ? null : options.InstanceId,
-                InstanceName = string.IsNullOrWhiteSpace(options.InstanceName) ? null : options.InstanceName,
+                TargetName     = resolvedTarget,
+                TargetRa       = targetRa,
+                TargetDec      = targetDec,
+                StartTime      = DateTime.UtcNow.ToString("o"),
+                InstanceId     = string.IsNullOrWhiteSpace(options.InstanceId) ? null : options.InstanceId,
+                InstanceName   = string.IsNullOrWhiteSpace(options.InstanceName) ? null : options.InstanceName,
+                PlannedTargets = plannedTargets,
             };
 
             var sessionId = await _apiClient.StartSessionAsync(request, CancellationToken.None);
@@ -502,6 +547,7 @@ public sealed class SessionService : IDisposable, IFocuserConsumer
                 _snapshot = new HeartbeatSnapshot(null, null, null);
                 _sessionStartTime = DateTime.UtcNow;
                 StartHeartbeatTimer(sessionId);
+                StartYieldPollTimer();
                 RegisterSessionEventConsumers();
                 Logger.Info($"[Subframes] Auto-session started on sequence start: sessionId={sessionId} target='{resolvedTarget}'");
             }
@@ -664,12 +710,8 @@ public sealed class SessionService : IDisposable, IFocuserConsumer
                 Hfr             = Finite(hfr),
                 HfrStdev        = Finite(e.StarDetectionAnalysis?.HFRStDev),
                 StarCount       = e.StarDetectionAnalysis?.DetectedStars,
-                // FWHM and Eccentricity: neither FWHM nor Eccentricity are defined on
-                // IStarDetectionAnalysis in NINA 3.x. StarFWHM and Eccentricity only exist
-                // on concrete implementations (e.g. Hocus Focus plugin), not the stock interface.
-                // Fields remain null until a typed accessor or plugin cast path is identified.
-                Fwhm            = null,
-                Eccentricity    = null,
+                Fwhm            = Finite(ReadReflectedDouble(e.StarDetectionAnalysis, ref _fwhmProp, ref _fwhmResolved, "FWHM", "StarFWHM")),
+                Eccentricity    = Finite(ReadReflectedDouble(e.StarDetectionAnalysis, ref _eccentricityProp, ref _eccentricityResolved, "Eccentricity")),
                 CameraTemp      = Finite(meta.Camera?.Temperature),
                 RmsRa           = rmsRa,
                 RmsDec          = rmsDec,
@@ -797,6 +839,7 @@ public sealed class SessionService : IDisposable, IFocuserConsumer
                 _snapshot = new HeartbeatSnapshot(null, null, null);
                 _sessionStartTime = DateTime.UtcNow;
                 StartHeartbeatTimer(sessionId);
+                StartYieldPollTimer();
                 RegisterSessionEventConsumers();
                 await PostFrameAsync(sessionId, e);
             }
@@ -815,6 +858,98 @@ public sealed class SessionService : IDisposable, IFocuserConsumer
         }
     }
 
+    // ── Exposure yield polling ───────────────────────────────────────────────
+
+    /// <summary>
+    /// Provides the list of current running sequence items for exposure yield tracking.
+    /// Set by Plugin.cs after <c>ISequenceMediator</c> is resolved via MEF.
+    /// Returns null when the sequencer is unavailable or the method does not exist on
+    /// this NINA build — polling will continue but <see cref="_trackingExposureYield"/>
+    /// will remain false so the backend receives null counters (not tracked).
+    /// </summary>
+    public Func<System.Collections.IList?>? SequenceItemsProvider { get; set; }
+
+    private void StartYieldPollTimer()
+    {
+        StopYieldPollTimer();
+        _prevItemStatuses = null;
+        _yieldPollTimer = new Timer(PollExposureYield, null, TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(1));
+    }
+
+    private void StopYieldPollTimer()
+    {
+        _yieldPollTimer?.Dispose();
+        _yieldPollTimer = null;
+        _prevItemStatuses = null;
+    }
+
+    /// <summary>
+    /// Timer callback — fires every second during an active session to detect LIGHT
+    /// frame exposures that have transitioned to SKIPPED or FAILED in the NINA sequencer.
+    /// All exceptions are caught; polling errors must never affect imaging.
+    /// </summary>
+    private void PollExposureYield(object? state)
+    {
+        try
+        {
+            var provider = SequenceItemsProvider;
+            if (provider is null) return;
+
+            System.Collections.IList? items;
+            try
+            {
+                items = provider.Invoke();
+            }
+            catch (Exception ex)
+            {
+                Logger.Debug($"[Subframes] PollExposureYield: sequence item provider threw, disabling yield tracking. {ex.Message}");
+                _trackingExposureYield = false;
+                StopYieldPollTimer();
+                return;
+            }
+
+            if (items is null) return;
+
+            // At least one successful poll — enable yield tracking so session end reports counts.
+            _trackingExposureYield = true;
+
+            var currentStatuses = new Dictionary<int, string>(items.Count);
+
+            foreach (var item in items)
+            {
+                if (item is null) continue;
+                var itemType = item.GetType();
+
+                // Only track LIGHT frame exposures; skip calibration frames.
+                var imageType = itemType.GetProperty("ImageType")?.GetValue(item)?.ToString();
+                if (!string.Equals(imageType, "LIGHT", StringComparison.OrdinalIgnoreCase))
+                    continue;
+
+                // Use object identity as a stable key across polls.
+                var key = RuntimeHelpers.GetHashCode(item);
+                var status = itemType.GetProperty("Status")?.GetValue(item)?.ToString() ?? string.Empty;
+                currentStatuses[key] = status;
+
+                // Detect transitions to SKIPPED or FAILED.
+                if (_prevItemStatuses is not null
+                    && _prevItemStatuses.TryGetValue(key, out var prevStatus)
+                    && !string.Equals(prevStatus, status, StringComparison.OrdinalIgnoreCase))
+                {
+                    if (string.Equals(status, "SKIPPED", StringComparison.OrdinalIgnoreCase))
+                        IncrementSkippedExposures();
+                    else if (string.Equals(status, "FAILED", StringComparison.OrdinalIgnoreCase))
+                        IncrementFailedExposures();
+                }
+            }
+
+            _prevItemStatuses = currentStatuses;
+        }
+        catch (Exception ex)
+        {
+            Logger.Debug($"[Subframes] PollExposureYield error: {ex.Message}");
+        }
+    }
+
     // ── Heartbeat timer ──────────────────────────────────────────────────────
 
     private void StartHeartbeatTimer(string sessionId)
@@ -827,6 +962,7 @@ public sealed class SessionService : IDisposable, IFocuserConsumer
 
     private void StopHeartbeatTimer()
     {
+        StopYieldPollTimer();
         _heartbeatCts?.Cancel();
         _heartbeatCts?.Dispose();
         _heartbeatCts = null;
