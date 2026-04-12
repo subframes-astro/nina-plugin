@@ -71,6 +71,17 @@ public class SubframesPlugin : PluginBase, IPluginManifest, IPartImportsSatisfie
     // Controls whether we send a full TS progress snapshot or an incremental delta.
     private bool _tsFirstBeat = true;
     private TargetSchedulerDetector? _tsDetector;
+    private TsPreviewClient? _tsPreviewClient;
+    private TsPreviewDto? _currentTsPreview; // Written only from the preview loop; read from BuildStationHeartbeatRequest
+    // Written from the preview loop (thread pool); read from TsProfiles property.
+    // Field assignment is atomic on .NET for reference types, so no lock needed for
+    // the snapshot-replace pattern used here.
+    private IReadOnlyList<TsProfileInfo> _tsProfiles = Array.Empty<TsProfileInfo>();
+    private Task? _tsPreviewLoopTask;
+
+    // Fired (on a thread pool thread) when the profile list is refreshed from the TS API.
+    // The OptionsPanelViewModel subscribes to keep its dropdown in sync.
+    internal event Action<IReadOnlyList<TsProfileInfo>>? TsProfilesUpdated;
 
     // DSO container subscription tracking: subscribed during each sequence run,
     // unsubscribed on SequenceFinished / Teardown.
@@ -271,6 +282,35 @@ public class SubframesPlugin : PluginBase, IPluginManifest, IPartImportsSatisfie
         }
     }
 
+    /// <summary>
+    /// The most recently fetched list of TS profiles, or empty when TS is not active.
+    /// Updated by the preview loop every 60 seconds.
+    /// </summary>
+    internal IReadOnlyList<TsProfileInfo> TsProfiles => _tsProfiles;
+
+    /// <summary>
+    /// Called by <see cref="UI.OptionsPanelViewModel"/> when the user picks a different TS profile.
+    /// Immediately re-fetches the preview and fires station + session heartbeats.
+    /// </summary>
+    internal void OnTsProfileSelected(string profileId)
+    {
+        if (!_isPrimary) return;
+
+        _options.SelectedTsProfileId = profileId;
+        _options.Save();
+
+        // Re-fetch preview and send heartbeats asynchronously — fire-and-forget.
+        _ = Task.Run(async () =>
+        {
+            await FetchAndUpdateTsPreviewAsync(CancellationToken.None).ConfigureAwait(false);
+            if (_isPrimary && _options.IsEnabled)
+            {
+                _ = _apiClient.SendStationHeartbeatAsync(BuildStationHeartbeatRequest(), CancellationToken.None);
+                _sessionService.TriggerImmediateHeartbeatIfActive();
+            }
+        });
+    }
+
     public override async Task Teardown()
     {
         if (_isPrimary)
@@ -295,6 +335,7 @@ public class SubframesPlugin : PluginBase, IPluginManifest, IPartImportsSatisfie
             StopStationHeartbeat();
             _tsDetector?.Dispose();
             _tsDetector = null;
+            _tsPreviewClient = null;
             _syncEngine.Dispose();
             _sessionService.Dispose();
             _frameCache.Dispose();
@@ -611,9 +652,11 @@ public class SubframesPlugin : PluginBase, IPluginManifest, IPartImportsSatisfie
         _tsFirstBeat = true;
         TsProgressReader.ResetCache();
         _tsDetector?.Start();
+        _tsPreviewClient = new TsPreviewClient(_options.TsApiPort);
         var cts = new CancellationTokenSource();
         _stationHeartbeatCts = cts;
         _stationHeartbeatTask = RunStationHeartbeatLoopAsync(cts.Token);
+        _tsPreviewLoopTask = RunTsPreviewLoopAsync(cts.Token);
     }
 
     private void StopStationHeartbeat()
@@ -622,6 +665,9 @@ public class SubframesPlugin : PluginBase, IPluginManifest, IPartImportsSatisfie
         _stationHeartbeatCts?.Dispose();
         _stationHeartbeatCts = null;
         _stationHeartbeatTask = null;
+        _tsPreviewLoopTask = null;
+        _currentTsPreview = null;
+        _tsProfiles = Array.Empty<TsProfileInfo>();
         _tsDetector?.Stop();
     }
 
@@ -794,7 +840,84 @@ public class SubframesPlugin : PluginBase, IPluginManifest, IPartImportsSatisfie
             TsProgressSnapshot  = tsSnapshot,
             TsProgressDelta     = tsDelta,
             TsAvailabilityState = _tsDetector?.CurrentState,
+            TsPreview           = _tsDetector?.CurrentState == "active" ? _currentTsPreview : null,
         };
+    }
+
+    // ── TS Preview loop ──────────────────────────────────────────────────────
+
+    private async Task RunTsPreviewLoopAsync(CancellationToken ct)
+    {
+        // Immediate fetch on startup so the first station heartbeat includes preview data.
+        await FetchAndUpdateTsPreviewAsync(ct).ConfigureAwait(false);
+
+        using var timer = new PeriodicTimer(TimeSpan.FromSeconds(60));
+        try
+        {
+            while (await timer.WaitForNextTickAsync(ct).ConfigureAwait(false))
+                await FetchAndUpdateTsPreviewAsync(ct).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            // Normal shutdown.
+        }
+        catch (Exception ex)
+        {
+            Logger.Error($"[Subframes] TS preview loop terminated unexpectedly: {ex.Message}");
+        }
+    }
+
+    private async Task FetchAndUpdateTsPreviewAsync(CancellationToken ct)
+    {
+        if (_tsDetector?.CurrentState != "active" || _tsPreviewClient is null)
+        {
+            _currentTsPreview = null;
+            return;
+        }
+
+        try
+        {
+            var profiles = await _tsPreviewClient.FetchProfilesAsync(ct).ConfigureAwait(false);
+            if (profiles.Count == 0)
+            {
+                _currentTsPreview = null;
+                return;
+            }
+
+            // Notify ViewModel if the profile list changed (compare by ID sequence).
+            var prevIds = _tsProfiles.Select(p => p.Id);
+            var newIds  = profiles.Select(p => p.Id);
+            if (!prevIds.SequenceEqual(newIds))
+            {
+                _tsProfiles = profiles;
+                TsProfilesUpdated?.Invoke(profiles);
+            }
+
+            // Resolve the selected profile: prefer the saved ID, fall back to Active, then first.
+            var savedId = _options.SelectedTsProfileId;
+            TsProfileInfo? selected = null;
+            if (!string.IsNullOrEmpty(savedId))
+                selected = profiles.FirstOrDefault(p => p.Id == savedId);
+
+            if (selected is null)
+            {
+                selected = profiles.FirstOrDefault(p => p.Active) ?? profiles[0];
+                // Persist the auto-selected profile so the dropdown reflects it.
+                _options.SelectedTsProfileId = selected.Id;
+                _options.Save();
+            }
+
+            _currentTsPreview = await _tsPreviewClient.FetchPreviewAsync(selected.Id, selected.Name, ct).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            Logger.Debug($"[Subframes] FetchAndUpdateTsPreviewAsync error: {ex.Message}");
+            _currentTsPreview = null;
+        }
     }
 
     private List<DeviceDto> BuildDevices()
