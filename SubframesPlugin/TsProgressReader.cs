@@ -25,25 +25,22 @@ internal static class TsProgressReader
     {
         try
         {
-            var dbPath = GetTsDbPath();
+            var dbPath = TsHelper.GetTsDbPath();
             if (dbPath is null || !File.Exists(dbPath))
+            {
+                Logger.Info($"[Subframes] Target Scheduler not detected (no database at {dbPath})");
                 return null;
+            }
 
             var entries = QueryProgress(dbPath);
-            Logger.Debug($"[Subframes] TS progress: found {entries.Count} row(s).");
+            Logger.Info($"[Subframes] TS progress: found {entries.Count} row(s).");
             return entries.Count > 0 ? entries : null;
         }
         catch (Exception ex)
         {
-            Logger.Debug($"[Subframes] TS progress: read skipped ({ex.GetType().Name}: {ex.Message})");
+            Logger.Warning($"[Subframes] TS progress: read skipped ({ex.GetType().Name}: {ex.Message})");
             return null;
         }
-    }
-
-    private static string GetTsDbPath()
-    {
-        var localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
-        return Path.Combine(localAppData, "NINA", "SchedulerPlugin", "schedulerdb.sqlite");
     }
 
     private static List<TsProgressInput> QueryProgress(string dbPath)

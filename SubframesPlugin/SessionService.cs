@@ -210,7 +210,9 @@ public sealed class SessionService : IDisposable, IFocuserConsumer
         // Query TS for per-frame grading results and all-time progress before clearing state.
         var sessionEnd = DateTime.UtcNow;
         var tsGrading  = TsGradingReader.ReadGradingResults(_sessionStartTime, sessionEnd);
+        Logger.Info($"[Subframes] TS grading results: {tsGrading?.Count ?? 0} entry/entries.");
         var tsProgress = TsProgressReader.ReadProgress();
+        Logger.Info($"[Subframes] TS progress results: {tsProgress?.Count ?? 0} row(s).");
 
         _activeSessionId = null;
         _activeSessionTargetId = null;
@@ -218,10 +220,16 @@ public sealed class SessionService : IDisposable, IFocuserConsumer
         await _apiClient.EndSessionAsync(sessionId, skipped, failed, ct);
 
         if (tsGrading is { Count: > 0 })
+        {
+            Logger.Info($"[Subframes] Sending {tsGrading.Count} TS grading entry/entries to API.");
             await _apiClient.PostTsGradingAsync(sessionId, tsGrading, ct);
+        }
 
         if (tsProgress is { Count: > 0 })
+        {
+            Logger.Info($"[Subframes] Sending {tsProgress.Count} TS progress row(s) to API.");
             await _apiClient.PostTsProgressAsync(sessionId, tsProgress, ct);
+        }
 
         Logger.Info("[Subframes] Session ended.");
     }
