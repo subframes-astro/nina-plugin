@@ -388,6 +388,14 @@ public sealed class StationHeartbeatRequest
     [JsonPropertyName("tsAvailabilityState")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? TsAvailabilityState { get; init; }
+
+    /// <summary>
+    /// Tonight's TS scheduling preview. Only sent when <see cref="TsAvailabilityState"/> is
+    /// <c>"active"</c> and a profile has been selected. Always a full snapshot.
+    /// </summary>
+    [JsonPropertyName("tsPreview")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public TsPreviewDto? TsPreview { get; init; }
 }
 
 /// <summary>One (project, target, filter) progress row used in snapshots and delta upserts.</summary>
@@ -442,6 +450,60 @@ public sealed class TsProgressDeltaDto
 
     [JsonPropertyName("removals")]
     public required List<TsProgressRemovalKeyDto> Removals { get; init; }
+}
+
+/// <summary>Tonight's TS scheduling preview sent in the station heartbeat when TS is active.</summary>
+public sealed class TsPreviewDto
+{
+    [JsonPropertyName("profileId")]
+    public required string ProfileId { get; init; }
+
+    [JsonPropertyName("profileName")]
+    public required string ProfileName { get; init; }
+
+    [JsonPropertyName("blocks")]
+    public required List<TsPreviewBlockDto> Blocks { get; init; }
+}
+
+/// <summary>One scheduling block in the TS preview — either a target imaging window or a wait period.</summary>
+public sealed class TsPreviewBlockDto
+{
+    /// <summary>TS target GUID. Null for wait-period blocks.</summary>
+    [JsonPropertyName("targetId")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? TargetId { get; init; }
+
+    [JsonPropertyName("targetName")]
+    public required string TargetName { get; init; }
+
+    [JsonPropertyName("waitPeriod")]
+    public bool WaitPeriod { get; init; }
+
+    [JsonPropertyName("startTime")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? StartTime { get; init; }
+
+    [JsonPropertyName("endTime")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? EndTime { get; init; }
+
+    /// <summary>Null for wait-period blocks.</summary>
+    [JsonPropertyName("exposurePlans")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public List<TsPreviewExposurePlanDto>? ExposurePlans { get; init; }
+}
+
+/// <summary>One exposure plan entry within a TS preview block.</summary>
+public sealed class TsPreviewExposurePlanDto
+{
+    [JsonPropertyName("filterName")]
+    public required string FilterName { get; init; }
+
+    [JsonPropertyName("exposure")]
+    public double Exposure { get; init; }
+
+    [JsonPropertyName("count")]
+    public int Count { get; init; }
 }
 
 /// <summary>Equipment info nested in StationHeartbeatRequest.</summary>

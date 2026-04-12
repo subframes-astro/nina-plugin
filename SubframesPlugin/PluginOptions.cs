@@ -69,6 +69,12 @@ public class PluginOptions
     /// </summary>
     public string TsDatabasePath { get; set; } = string.Empty;
 
+    /// <summary>
+    /// The TS profile ID the user has selected for tonight's plan preview.
+    /// Empty string means the plugin will auto-select (active profile, or first available).
+    /// </summary>
+    public string SelectedTsProfileId { get; set; } = string.Empty;
+
     // ── Persistence ──────────────────────────────────────────────────────────
 
     /// <summary>Load settings from disk, or return defaults if not present.</summary>

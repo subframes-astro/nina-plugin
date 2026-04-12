@@ -1,3 +1,4 @@
+using System.Collections.ObjectModel;
 using System.ComponentModel.Composition;
 using System.Windows.Input;
 using System.Windows.Media;
@@ -62,6 +63,18 @@ public partial class OptionsPanelViewModel : ObservableObject
     [ObservableProperty]
     private string _tsDatabasePath = string.Empty;
 
+    [ObservableProperty]
+    private string? _selectedTsProfileId;
+
+    /// <summary>True when multiple TS profiles are available and the user should pick one.</summary>
+    public bool ShowProfileSelector => TsProfiles.Count > 1;
+
+    /// <summary>Available TS profiles, populated when TS is active.</summary>
+    public ObservableCollection<TsProfileInfo> TsProfiles { get; } = new();
+
+    // Prevents triggering heartbeats during ViewModel initialization.
+    private bool _profileSelectorInitialized;
+
     public OptionsPanelViewModel(SubframesPlugin plugin)
     {
         _plugin = plugin;
@@ -78,6 +91,16 @@ public partial class OptionsPanelViewModel : ObservableObject
         InstanceName = _options.InstanceName;
         TsApiPort = _options.TsApiPort;
         TsDatabasePath = _options.TsDatabasePath;
+
+        // Subscribe to profile list updates from the plugin's preview loop.
+        plugin.TsProfilesUpdated += OnTsProfilesUpdated;
+
+        // Seed initial profile list (may already be populated if plugin started earlier).
+        var initial = plugin.TsProfiles;
+        if (initial.Count > 0)
+            OnTsProfilesUpdated(initial);
+
+        _profileSelectorInitialized = true;
 
         RefreshStatus();
     }
@@ -175,6 +198,47 @@ public partial class OptionsPanelViewModel : ObservableObject
         {
             IsCheckingApi = false;
         }
+    }
+
+    // ── Profile selector ─────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Called by CommunityToolkit.Mvvm when SelectedTsProfileId changes.
+    /// Notifies the plugin to re-fetch the preview and fire immediate heartbeats.
+    /// </summary>
+    partial void OnSelectedTsProfileIdChanged(string? value)
+    {
+        if (!_profileSelectorInitialized || value is null) return;
+        _plugin.OnTsProfileSelected(value);
+    }
+
+    /// <summary>
+    /// Updates the profile dropdown. Called from the plugin's preview loop (thread-pool thread)
+    /// and marshalled to the UI dispatcher.
+    /// </summary>
+    private void OnTsProfilesUpdated(IReadOnlyList<TsProfileInfo> profiles)
+    {
+        System.Windows.Application.Current?.Dispatcher.InvokeAsync(() =>
+        {
+            TsProfiles.Clear();
+            foreach (var p in profiles)
+                TsProfiles.Add(p);
+
+            // Auto-select when only one profile — no UI needed.
+            if (profiles.Count == 1)
+            {
+                SelectedTsProfileId = profiles[0].Id;
+            }
+            else if (SelectedTsProfileId is null ||
+                     !profiles.Any(p => p.Id == SelectedTsProfileId))
+            {
+                // Restore persisted selection or fall back to the first.
+                var saved = _options.SelectedTsProfileId;
+                SelectedTsProfileId = profiles.Any(p => p.Id == saved) ? saved : profiles[0].Id;
+            }
+
+            OnPropertyChanged(nameof(ShowProfileSelector));
+        });
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────

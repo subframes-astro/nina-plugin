@@ -468,6 +468,16 @@ public sealed class SessionService : IDisposable, IFocuserConsumer
     }
 
     /// <summary>
+    /// Fires an immediate session heartbeat if a session is currently active.
+    /// No-op when no session is open.
+    /// </summary>
+    public void TriggerImmediateHeartbeatIfActive()
+    {
+        var id = _activeSessionId;
+        if (id is not null) FireImmediateHeartbeat(id);
+    }
+
+    /// <summary>
     /// Sends a heartbeat immediately (outside the regular 60-second timer) so the web app
     /// reflects state changes like target detection without waiting for the next tick.
     /// </summary>

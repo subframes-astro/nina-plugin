@@ -7,6 +7,9 @@
     xmlns:local="clr-namespace:Subframes.NinaPlugin.UI"
     mc:Ignorable="d"
     d:DesignHeight="300" d:DesignWidth="400">
+    <UserControl.Resources>
+        <BooleanToVisibilityConverter x:Key="BoolToVis" />
+    </UserControl.Resources>
 
     <StackPanel Margin="10" HorizontalAlignment="Stretch">
 
@@ -133,6 +136,22 @@
             Text="{Binding TsDatabasePath, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
             ToolTip="Path to targetscheduler.db — leave blank for default: %localappdata%\NINA\TargetScheduler\targetscheduler.db"
             Margin="0,0,0,12" />
+
+        <!-- TS Profile Selector (shown only when multiple profiles are available) -->
+        <StackPanel
+            Visibility="{Binding ShowProfileSelector, Converter={StaticResource BoolToVis}}"
+            Margin="0,0,0,12">
+            <TextBlock
+                Text="TS Profile"
+                Margin="0,0,0,4"
+                Foreground="{DynamicResource PrimaryBrush}" />
+            <ComboBox
+                ItemsSource="{Binding TsProfiles}"
+                DisplayMemberPath="Name"
+                SelectedValuePath="Id"
+                SelectedValue="{Binding SelectedTsProfileId, Mode=TwoWay}"
+                ToolTip="Select the Target Scheduler profile to use for tonight's plan preview" />
+        </StackPanel>
 
         <!-- Save button -->
         <Button
