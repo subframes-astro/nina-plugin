@@ -89,6 +89,11 @@ public sealed class PlannedTargetInput
     [JsonPropertyName("estimatedExposureSec")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public double? EstimatedExposureSec { get; init; }
+
+    /// <summary>Camera rotation in degrees [0, 360) from the TS project target. Null when not configured.</summary>
+    [JsonPropertyName("cameraRotation")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public double? CameraRotation { get; init; }
 }
 
 /// <summary>Body for POST /api/v1/ingest/session/end</summary>
@@ -499,6 +504,11 @@ public sealed class TsPreviewBlockDto
     [JsonPropertyName("angularSizeDeg")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public double? AngularSizeDeg { get; init; }
+
+    /// <summary>Camera rotation in degrees [0, 360) from the TS project target. Null for wait-period blocks or when not configured.</summary>
+    [JsonPropertyName("rotation")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public double? Rotation { get; init; }
 
     /// <summary>Null for wait-period blocks.</summary>
     [JsonPropertyName("exposurePlans")]

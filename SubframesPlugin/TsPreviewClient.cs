@@ -91,7 +91,7 @@ internal sealed class TsPreviewClient
                 .Distinct(StringComparer.OrdinalIgnoreCase)
                 .ToList();
 
-            // Look up RA/Dec from the TS SQLite database keyed by target name.
+            // Look up RA/Dec/Rotation from the TS SQLite database keyed by target name.
             var coordsByName = targetNames.Count > 0 ? LookupCoordinatesByName(targetNames) : [];
 
             // Filter out any blocks missing StartTime or EndTime — the backend requires both fields.
@@ -103,12 +103,13 @@ internal sealed class TsPreviewClient
                 {
                     // Prefer RA/Dec from the HTTP API response if present (future-proofing),
                     // otherwise fall back to the coordinate lookup from the TS SQLite database.
-                    double? ra = null, dec = null;
+                    double? ra = null, dec = null, rotation = null;
                     if (!b.WaitPeriod && !string.IsNullOrEmpty(b.Name)
                         && coordsByName.TryGetValue(b.Name, out var c))
                     {
                         ra = c.Ra;
                         dec = c.Dec;
+                        rotation = c.Rotation;
                     }
 
                     return new TsPreviewBlockDto
@@ -121,6 +122,7 @@ internal sealed class TsPreviewClient
                         Ra = b.WaitPeriod ? null : (b.Ra ?? ra),
                         Dec = b.WaitPeriod ? null : (b.Dec ?? dec),
                         AngularSizeDeg = b.WaitPeriod ? null : b.AngularSizeDeg,
+                        Rotation = b.WaitPeriod ? null : rotation,
                         ExposurePlans = b.ExposurePlan is { Count: > 0 }
                             ? b.ExposurePlan.Select(ep => new TsPreviewExposurePlanDto
                             {
@@ -151,12 +153,12 @@ internal sealed class TsPreviewClient
     }
 
     /// <summary>
-    /// Looks up RA (converted from hours to degrees) and Dec (degrees) for a set of target names
-    /// from the TS SQLite database. Matches by name because the TS preview HTTP API returns
-    /// runtime GUIDs that do not correspond to the integer PKs in the Target table.
+    /// Looks up RA (converted from hours to degrees), Dec (degrees), and Rotation (degrees) for a
+    /// set of target names from the TS SQLite database. Matches by name because the TS preview HTTP
+    /// API returns runtime GUIDs that do not correspond to the integer PKs in the Target table.
     /// Returns an empty dictionary if the database is not found or any error occurs — never throws.
     /// </summary>
-    private static Dictionary<string, (double Ra, double Dec)> LookupCoordinatesByName(IReadOnlyList<string> targetNames)
+    private static Dictionary<string, (double Ra, double Dec, double? Rotation)> LookupCoordinatesByName(IReadOnlyList<string> targetNames)
     {
         try
         {
@@ -179,21 +181,22 @@ internal sealed class TsPreviewClient
             // Build parameterized IN clause to avoid SQL injection.
             var paramNames = targetNames.Select((_, i) => $"@p{i}").ToList();
             using var cmd = conn.CreateCommand();
-            cmd.CommandText = $"SELECT Name, ra, dec FROM target WHERE Name IN ({string.Join(", ", paramNames)})";
+            cmd.CommandText = $"SELECT Name, ra, dec, rotation FROM target WHERE Name IN ({string.Join(", ", paramNames)})";
 
             for (var i = 0; i < targetNames.Count; i++)
                 cmd.Parameters.AddWithValue(paramNames[i], targetNames[i]);
 
-            var result = new Dictionary<string, (double Ra, double Dec)>(StringComparer.OrdinalIgnoreCase);
+            var result = new Dictionary<string, (double Ra, double Dec, double? Rotation)>(StringComparer.OrdinalIgnoreCase);
             using var reader = cmd.ExecuteReader();
             while (reader.Read())
             {
                 if (reader.IsDBNull(0) || reader.IsDBNull(1) || reader.IsDBNull(2)) continue;
-                var name    = reader.GetString(0);
-                var raHours = reader.GetDouble(1);
-                var decDeg  = reader.GetDouble(2);
+                var name     = reader.GetString(0);
+                var raHours  = reader.GetDouble(1);
+                var decDeg   = reader.GetDouble(2);
+                var rotation = reader.IsDBNull(3) ? (double?)null : reader.GetDouble(3);
                 // TS stores RA in hours (0–24); convert to degrees for the API/frontend.
-                result[name] = (raHours * 15.0, decDeg);
+                result[name] = (raHours * 15.0, decDeg, rotation);
             }
 
             return result;
