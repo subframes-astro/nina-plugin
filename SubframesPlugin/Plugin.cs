@@ -73,6 +73,7 @@ public class SubframesPlugin : PluginBase, IPluginManifest, IPartImportsSatisfie
     private TargetSchedulerDetector? _tsDetector;
     private TsPreviewClient? _tsPreviewClient;
     private TsPreviewDto? _currentTsPreview; // Written only from the preview loop; read from BuildStationHeartbeatRequest
+    private TaskCompletionSource<bool>? _previewFirstFetchDone;
     // Written from the preview loop (thread pool); read from TsProfiles property.
     // Field assignment is atomic on .NET for reference types, so no lock needed for
     // the snapshot-replace pattern used here.
@@ -655,6 +656,7 @@ public class SubframesPlugin : PluginBase, IPluginManifest, IPartImportsSatisfie
         _tsPreviewClient = new TsPreviewClient(_options.TsApiPort);
         var cts = new CancellationTokenSource();
         _stationHeartbeatCts = cts;
+        _previewFirstFetchDone = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
         _stationHeartbeatTask = RunStationHeartbeatLoopAsync(cts.Token);
         _tsPreviewLoopTask = RunTsPreviewLoopAsync(cts.Token);
     }
@@ -666,6 +668,8 @@ public class SubframesPlugin : PluginBase, IPluginManifest, IPartImportsSatisfie
         _stationHeartbeatCts = null;
         _stationHeartbeatTask = null;
         _tsPreviewLoopTask = null;
+        _previewFirstFetchDone?.TrySetCanceled();
+        _previewFirstFetchDone = null;
         _currentTsPreview = null;
         _tsProfiles = Array.Empty<TsProfileInfo>();
         _tsDetector?.Stop();
@@ -694,6 +698,18 @@ public class SubframesPlugin : PluginBase, IPluginManifest, IPartImportsSatisfie
             try
             {
                 await Task.Delay(TimeSpan.FromSeconds(3), ct).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) { return; }
+        }
+
+        // Wait for the preview loop to complete its first fetch (up to 10 s) so the
+        // first heartbeat includes TS preview data.  Times out gracefully — the
+        // heartbeat fires regardless so no data is permanently lost.
+        if (_previewFirstFetchDone is { } tcs)
+        {
+            try
+            {
+                await Task.WhenAny(tcs.Task, Task.Delay(TimeSpan.FromSeconds(10), ct)).ConfigureAwait(false);
             }
             catch (OperationCanceledException) { return; }
         }
@@ -850,6 +866,7 @@ public class SubframesPlugin : PluginBase, IPluginManifest, IPartImportsSatisfie
     {
         // Immediate fetch on startup so the first station heartbeat includes preview data.
         await FetchAndUpdateTsPreviewAsync(ct).ConfigureAwait(false);
+        _previewFirstFetchDone?.TrySetResult(true);
 
         using var timer = new PeriodicTimer(TimeSpan.FromSeconds(60));
         try
@@ -907,7 +924,15 @@ public class SubframesPlugin : PluginBase, IPluginManifest, IPartImportsSatisfie
                 _options.Save();
             }
 
+            var previousBlockCount = _currentTsPreview?.Blocks?.Count ?? 0;
             _currentTsPreview = await _tsPreviewClient.FetchPreviewAsync(selected.Id, selected.Name, ct).ConfigureAwait(false);
+            var newBlockCount = _currentTsPreview?.Blocks?.Count ?? 0;
+            if (newBlockCount != previousBlockCount && newBlockCount > 0)
+            {
+                // Preview changed — push an immediate heartbeat so the dashboard
+                // reflects the update within ~60 s instead of waiting up to 300 s.
+                _ = _apiClient.SendStationHeartbeatAsync(BuildStationHeartbeatRequest(), CancellationToken.None);
+            }
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
