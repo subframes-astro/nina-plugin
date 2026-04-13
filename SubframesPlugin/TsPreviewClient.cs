@@ -1,6 +1,8 @@
+using System.IO;
 using System.Net.Http;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using Microsoft.Data.Sqlite;
 using NINA.Core.Utility;
 using Subframes.NinaPlugin.Api;
 
@@ -80,29 +82,52 @@ internal sealed class TsPreviewClient
             var rawBlocks = JsonSerializer.Deserialize<List<TsPreviewBlockRaw>>(json, _jsonOptions);
             if (rawBlocks is null) return null;
 
+            // Collect distinct target IDs from non-wait-period blocks for coordinate enrichment.
+            var targetIds = rawBlocks
+                .Where(b => !b.WaitPeriod && !string.IsNullOrEmpty(b.Id))
+                .Select(b => b.Id!)
+                .Distinct(StringComparer.Ordinal)
+                .ToList();
+
+            // Look up RA/Dec from the TS SQLite database. Returns empty dict on any error.
+            var coords = targetIds.Count > 0 ? LookupCoordinates(targetIds) : [];
+
             // Filter out any blocks missing StartTime or EndTime — the backend requires both fields.
             // Well-behaved TS responses always include times for every block (including wait periods),
             // so this guard is purely defensive against malformed data.
             var blocks = rawBlocks
                 .Where(b => b.StartTime is not null && b.EndTime is not null)
-                .Select(b => new TsPreviewBlockDto
+                .Select(b =>
                 {
-                    TargetId = string.IsNullOrEmpty(b.Id) ? null : b.Id,
-                    TargetName = b.Name ?? string.Empty,
-                    WaitPeriod = b.WaitPeriod,
-                    StartTime = b.StartTime!,
-                    EndTime = b.EndTime!,
-                    Ra = b.WaitPeriod ? null : b.Ra,
-                    Dec = b.WaitPeriod ? null : b.Dec,
-                    AngularSizeDeg = b.WaitPeriod ? null : b.AngularSizeDeg,
-                    ExposurePlans = b.ExposurePlan is { Count: > 0 }
-                        ? b.ExposurePlan.Select(ep => new TsPreviewExposurePlanDto
-                        {
-                            FilterName = ep.FilterName ?? string.Empty,
-                            Exposure = ep.Exposure,
-                            Count = ep.Count,
-                        }).ToList()
-                        : null,
+                    // Prefer RA/Dec from the HTTP API response if present (future-proofing),
+                    // otherwise fall back to the coordinate lookup from the TS SQLite database.
+                    double? ra = null, dec = null;
+                    if (!b.WaitPeriod && !string.IsNullOrEmpty(b.Id)
+                        && coords.TryGetValue(b.Id, out var c))
+                    {
+                        ra = c.Ra;
+                        dec = c.Dec;
+                    }
+
+                    return new TsPreviewBlockDto
+                    {
+                        TargetId = string.IsNullOrEmpty(b.Id) ? null : b.Id,
+                        TargetName = b.Name ?? string.Empty,
+                        WaitPeriod = b.WaitPeriod,
+                        StartTime = b.StartTime!,
+                        EndTime = b.EndTime!,
+                        Ra = b.WaitPeriod ? null : (b.Ra ?? ra),
+                        Dec = b.WaitPeriod ? null : (b.Dec ?? dec),
+                        AngularSizeDeg = b.WaitPeriod ? null : b.AngularSizeDeg,
+                        ExposurePlans = b.ExposurePlan is { Count: > 0 }
+                            ? b.ExposurePlan.Select(ep => new TsPreviewExposurePlanDto
+                            {
+                                FilterName = ep.FilterName ?? string.Empty,
+                                Exposure = ep.Exposure,
+                                Count = ep.Count,
+                            }).ToList()
+                            : null,
+                    };
                 }).ToList();
 
             return new TsPreviewDto
@@ -120,6 +145,66 @@ internal sealed class TsPreviewClient
         {
             Logger.Warning($"[Subframes] TsPreviewClient.FetchPreviewAsync failed for profile '{profileName}' ({profileId}): {ex.GetType().Name}: {ex.Message}");
             return null;
+        }
+    }
+
+    /// <summary>
+    /// Looks up RA (converted from hours to degrees) and Dec (degrees) for a set of target IDs
+    /// from the TS SQLite database. Returns an empty dictionary if the database is not found or
+    /// any error occurs — never throws.
+    /// </summary>
+    private static Dictionary<string, (double Ra, double Dec)> LookupCoordinates(IReadOnlyList<string> targetIds)
+    {
+        try
+        {
+            var dbPath = TsHelper.GetTsDbPath();
+            if (!File.Exists(dbPath))
+            {
+                Logger.Info($"[Subframes] TsPreviewClient.LookupCoordinates: TS database not found at {dbPath}");
+                return [];
+            }
+
+            var connStr = new SqliteConnectionStringBuilder
+            {
+                DataSource = dbPath,
+                Mode       = SqliteOpenMode.ReadOnly,
+            }.ToString();
+
+            using var conn = new SqliteConnection(connStr);
+            conn.Open();
+
+            // Build parameterized IN clause to avoid SQL injection.
+            var paramNames = targetIds.Select((_, i) => $"@p{i}").ToList();
+            using var cmd = conn.CreateCommand();
+            cmd.CommandText = $"SELECT Id, ra, dec FROM target WHERE Id IN ({string.Join(", ", paramNames)})";
+
+            for (var i = 0; i < targetIds.Count; i++)
+            {
+                // Target.Id is an INTEGER column; parse the string ID so SQLite matches correctly.
+                if (long.TryParse(targetIds[i], out var intId))
+                    cmd.Parameters.AddWithValue(paramNames[i], intId);
+                else
+                    cmd.Parameters.AddWithValue(paramNames[i], targetIds[i]);
+            }
+
+            var result = new Dictionary<string, (double Ra, double Dec)>(StringComparer.Ordinal);
+            using var reader = cmd.ExecuteReader();
+            while (reader.Read())
+            {
+                if (reader.IsDBNull(1) || reader.IsDBNull(2)) continue;
+                var id      = reader.GetInt64(0).ToString();
+                var raHours = reader.GetDouble(1);
+                var decDeg  = reader.GetDouble(2);
+                // TS stores RA in hours (0–24); convert to degrees for the API/frontend.
+                result[id] = (raHours * 15.0, decDeg);
+            }
+
+            return result;
+        }
+        catch (Exception ex)
+        {
+            Logger.Warning($"[Subframes] TsPreviewClient.LookupCoordinates failed: {ex.GetType().Name}: {ex.Message}");
+            return [];
         }
     }
 
