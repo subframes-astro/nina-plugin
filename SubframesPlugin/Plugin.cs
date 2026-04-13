@@ -70,6 +70,9 @@ public class SubframesPlugin : PluginBase, IPluginManifest, IPartImportsSatisfie
     // True until the first station heartbeat is sent after init or restart.
     // Controls whether we send a full TS progress snapshot or an incremental delta.
     private bool _tsFirstBeat = true;
+    // Set to true when the first Start Session command executes.
+    // TS preview queries and planner data are suppressed until then.
+    private volatile bool _sessionEverStarted;
     private TargetSchedulerDetector? _tsDetector;
     private TsPreviewClient? _tsPreviewClient;
     private TsPreviewDto? _currentTsPreview; // Written only from the preview loop; read from BuildStationHeartbeatRequest
@@ -436,6 +439,7 @@ public class SubframesPlugin : PluginBase, IPluginManifest, IPartImportsSatisfie
     {
         try
         {
+            _sessionEverStarted = true;
             _ = _apiClient.SendStationHeartbeatAsync(BuildStationHeartbeatRequest(), CancellationToken.None);
             Logger.Debug("[Subframes] Immediate station heartbeat triggered on session start.");
         }
@@ -825,23 +829,27 @@ public class SubframesPlugin : PluginBase, IPluginManifest, IPartImportsSatisfie
         catch { /* safety monitor not available */ }
 
         // Include TS progress: full snapshot on first beat, delta on subsequent beats.
+        // Suppressed until the user has run Start Session at least once this NINA session.
         TsProgressSnapshotDto? tsSnapshot = null;
         TsProgressDeltaDto? tsDelta = null;
-        try
+        if (_sessionEverStarted)
         {
-            if (_tsFirstBeat)
+            try
             {
-                tsSnapshot = TsProgressReader.ReadProgressSnapshot();
-                _tsFirstBeat = false;
+                if (_tsFirstBeat)
+                {
+                    tsSnapshot = TsProgressReader.ReadProgressSnapshot();
+                    _tsFirstBeat = false;
+                }
+                else
+                {
+                    tsDelta = TsProgressReader.ReadProgressDelta();
+                }
             }
-            else
+            catch (Exception ex)
             {
-                tsDelta = TsProgressReader.ReadProgressDelta();
+                Logger.Debug($"[Subframes] Station heartbeat: TS progress skipped ({ex.GetType().Name}: {ex.Message})");
             }
-        }
-        catch (Exception ex)
-        {
-            Logger.Debug($"[Subframes] Station heartbeat: TS progress skipped ({ex.GetType().Name}: {ex.Message})");
         }
 
         return new StationHeartbeatRequest
@@ -886,6 +894,14 @@ public class SubframesPlugin : PluginBase, IPluginManifest, IPartImportsSatisfie
 
     private async Task FetchAndUpdateTsPreviewAsync(CancellationToken ct)
     {
+        // Do not query the TS preview endpoint until the user has triggered
+        // a Start Session command at least once this NINA session.
+        if (!_sessionEverStarted)
+        {
+            _currentTsPreview = null;
+            return;
+        }
+
         if (_tsDetector?.CurrentState != "active" || _tsPreviewClient is null)
         {
             _currentTsPreview = null;
