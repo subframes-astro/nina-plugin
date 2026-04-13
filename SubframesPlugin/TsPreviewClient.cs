@@ -92,6 +92,9 @@ internal sealed class TsPreviewClient
                     WaitPeriod = b.WaitPeriod,
                     StartTime = b.StartTime!,
                     EndTime = b.EndTime!,
+                    Ra = b.WaitPeriod ? null : b.Ra,
+                    Dec = b.WaitPeriod ? null : b.Dec,
+                    AngularSizeDeg = b.WaitPeriod ? null : b.AngularSizeDeg,
                     ExposurePlans = b.ExposurePlan is { Count: > 0 }
                         ? b.ExposurePlan.Select(ep => new TsPreviewExposurePlanDto
                         {
@@ -136,6 +139,9 @@ internal sealed class TsPreviewClient
         public bool WaitPeriod { get; init; }
         public string? StartTime { get; init; }
         public string? EndTime { get; init; }
+        public double? Ra { get; init; }
+        public double? Dec { get; init; }
+        public double? AngularSizeDeg { get; init; }
         public List<TsPreviewExposurePlanRaw>? ExposurePlan { get; init; }
     }
 

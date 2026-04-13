@@ -485,6 +485,21 @@ public sealed class TsPreviewBlockDto
     [JsonPropertyName("endTime")]
     public required string EndTime { get; init; }
 
+    /// <summary>Right ascension in degrees. Null for wait-period blocks.</summary>
+    [JsonPropertyName("ra")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public double? Ra { get; init; }
+
+    /// <summary>Declination in degrees. Null for wait-period blocks.</summary>
+    [JsonPropertyName("dec")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public double? Dec { get; init; }
+
+    /// <summary>Angular size in degrees. Null for wait-period blocks or when unavailable.</summary>
+    [JsonPropertyName("angularSizeDeg")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public double? AngularSizeDeg { get; init; }
+
     /// <summary>Null for wait-period blocks.</summary>
     [JsonPropertyName("exposurePlans")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
