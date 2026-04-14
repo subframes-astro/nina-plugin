@@ -782,19 +782,34 @@ public class SubframesPlugin : PluginBase, IPluginManifest, IPartImportsSatisfie
             string? filterWheelName = null;
             try { filterWheelName = _filterWheelMediator.GetInfo().Name; } catch { }
 
+            string? focuserName = null, rotatorName = null, guiderName = null,
+                    flatDeviceName = null, safetyMonitorName = null, weatherStationName = null;
+            try { var i = _focuserMediator.GetInfo();       if (i.Connected) focuserName        = i.Name; } catch { }
+            try { var i = _rotatorMediator.GetInfo();       if (i.Connected) rotatorName         = i.Name; } catch { }
+            try { var i = _guiderMediator.GetInfo();        if (i.Connected) guiderName          = i.Name; } catch { }
+            try { var i = _flatDeviceMediator.GetInfo();    if (i.Connected) flatDeviceName      = i.Name; } catch { }
+            try { var i = _safetyMonitorMediator.GetInfo(); if (i.Connected) safetyMonitorName   = i.Name; } catch { }
+            try { var i = _weatherDataMediator.GetInfo();   if (i.Connected) weatherStationName  = i.Name; } catch { }
+
             equipment = new StationEquipmentDto
             {
-                TelescopeName = ts?.Name,
-                FocalLength   = DoubleExtensions.Finite(ts?.FocalLength),
-                Aperture      = DoubleExtensions.Finite(apertureDiameter),
-                CameraName    = cameraName,
-                SensorWidth   = sensorWidth,
-                SensorHeight  = sensorHeight,
-                PixelSize     = DoubleExtensions.Finite(cs?.PixelSize),
-                MountName     = ts?.Name,
-                FilterWheel   = filterWheelName,
-                Filters       = filters is { Count: > 0 } ? filters : null,
-                Devices       = devices is { Count: > 0 } ? devices : null,
+                TelescopeName      = ts?.Name,
+                FocalLength        = DoubleExtensions.Finite(ts?.FocalLength),
+                Aperture           = DoubleExtensions.Finite(apertureDiameter),
+                CameraName         = cameraName,
+                SensorWidth        = sensorWidth,
+                SensorHeight       = sensorHeight,
+                PixelSize          = DoubleExtensions.Finite(cs?.PixelSize),
+                MountName          = ts?.Name,
+                FilterWheel        = filterWheelName,
+                Filters            = filters is { Count: > 0 } ? filters : null,
+                FocuserName        = string.IsNullOrEmpty(focuserName)       ? null : focuserName,
+                RotatorName        = string.IsNullOrEmpty(rotatorName)       ? null : rotatorName,
+                GuiderName         = string.IsNullOrEmpty(guiderName)        ? null : guiderName,
+                FlatDeviceName     = string.IsNullOrEmpty(flatDeviceName)    ? null : flatDeviceName,
+                SafetyMonitorName  = string.IsNullOrEmpty(safetyMonitorName) ? null : safetyMonitorName,
+                WeatherStationName = string.IsNullOrEmpty(weatherStationName)? null : weatherStationName,
+                Devices            = devices is { Count: > 0 } ? devices : null,
             };
         }
         catch (Exception ex)

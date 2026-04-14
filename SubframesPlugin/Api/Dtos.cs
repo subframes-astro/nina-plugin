@@ -337,6 +337,31 @@ public sealed class FrameInput
     [JsonPropertyName("rotatorPosition")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public double? RotatorPosition { get; init; }
+
+    /// <summary>Telescope altitude in degrees at time of capture. Null when telescope not connected.</summary>
+    [JsonPropertyName("altitude")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public double? Altitude { get; init; }
+
+    /// <summary>Telescope azimuth in degrees at time of capture. Null when telescope not connected.</summary>
+    [JsonPropertyName("azimuth")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public double? Azimuth { get; init; }
+
+    /// <summary>Focuser position (step count) at time of capture. Null when focuser not connected.</summary>
+    [JsonPropertyName("focuserPosition")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public int? FocuserPosition { get; init; }
+
+    /// <summary>Median Absolute Deviation of pixel values. Null when image statistics unavailable.</summary>
+    [JsonPropertyName("madAdu")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public double? MadAdu { get; init; }
+
+    /// <summary>Bit depth of the captured image (e.g. 16). Null when image statistics unavailable.</summary>
+    [JsonPropertyName("bitDepth")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public int? BitDepth { get; init; }
 }
 
 /// <summary>Body for POST /api/v1/ingest/station/heartbeat</summary>
@@ -571,6 +596,34 @@ public sealed class StationEquipmentDto
     [JsonPropertyName("filters")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public List<string>? Filters { get; init; }
+
+    [JsonPropertyName("focuserName")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? FocuserName { get; init; }
+
+    [JsonPropertyName("rotatorName")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? RotatorName { get; init; }
+
+    [JsonPropertyName("guiderName")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? GuiderName { get; init; }
+
+    [JsonPropertyName("domeName")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? DomeName { get; init; }
+
+    [JsonPropertyName("flatDeviceName")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? FlatDeviceName { get; init; }
+
+    [JsonPropertyName("safetyMonitorName")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? SafetyMonitorName { get; init; }
+
+    [JsonPropertyName("weatherStationName")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? WeatherStationName { get; init; }
 
     [JsonPropertyName("accessories")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
