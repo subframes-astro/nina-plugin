@@ -1348,9 +1348,6 @@ public sealed class SessionService : IDisposable, IFocuserConsumer, IGuiderConsu
         }
     }
 
-    /// <summary>No-op — individual guide steps are not used for session events.</summary>
-    public void UpdateGuideSteps(GuideStepsChangedEvent guideStepsChangedEvent) { }
-
     // ── ISafetyMonitorConsumer ───────────────────────────────────────────────
 
     /// <summary>
