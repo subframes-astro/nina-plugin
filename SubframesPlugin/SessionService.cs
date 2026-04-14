@@ -1327,7 +1327,10 @@ public sealed class SessionService : IDisposable, IFocuserConsumer, IGuiderConsu
 
         try
         {
-            var isNowGuiding = deviceInfo.Connected && deviceInfo.IsGuiding;
+            // GuiderInfo in SDK 3.2.0.9001 does not expose an IsGuiding property.
+            // Use Connected as a proxy: treat connected→disconnected as guiding_stop and
+            // disconnected→connected as guiding_start.
+            var isNowGuiding = deviceInfo.Connected;
             var wasGuiding   = _lastGuiderWasGuiding;
 
             if (isNowGuiding == wasGuiding) return; // No state change — nothing to emit.
