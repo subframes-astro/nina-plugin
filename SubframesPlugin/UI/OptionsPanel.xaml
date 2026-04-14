@@ -47,7 +47,7 @@
             Margin="0,0,0,4"
             Foreground="{DynamicResource PrimaryBrush}" />
         <TextBox
-            Text="{Binding ApiBaseUrl, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+            Text="{Binding ApiBaseUrl, Mode=TwoWay, UpdateSourceTrigger=LostFocus}"
             IsEnabled="{Binding IsEnabled}"
             ToolTip="e.g. http://localhost:8080"
             Margin="0,0,0,12" />
@@ -62,7 +62,8 @@
             IsEnabled="{Binding IsEnabled}"
             ToolTip="Your Subframes API key (starts with astk_live_)"
             Margin="0,0,0,4"
-            PasswordChanged="ApiKeyBox_PasswordChanged" />
+            PasswordChanged="ApiKeyBox_PasswordChanged"
+            LostFocus="ApiKeyBox_LostFocus" />
 
         <!-- API Connection Status -->
         <StackPanel Orientation="Horizontal" Margin="0,0,0,12">
@@ -102,7 +103,7 @@
             Margin="0,0,0,4"
             Foreground="{DynamicResource PrimaryBrush}" />
         <TextBox
-            Text="{Binding InstanceName, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+            Text="{Binding InstanceName, Mode=TwoWay, UpdateSourceTrigger=LostFocus}"
             IsEnabled="{Binding IsEnabled}"
             ToolTip="Friendly name for this NINA instance (e.g. Main Scope, Widefield Rig)"
             Margin="0,0,0,12" />
@@ -123,7 +124,7 @@
             Margin="0,0,0,4"
             Foreground="{DynamicResource PrimaryBrush}" />
         <TextBox
-            Text="{Binding TsApiPort, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+            Text="{Binding TsApiPort, Mode=TwoWay, UpdateSourceTrigger=LostFocus}"
             ToolTip="Target Scheduler local HTTP API port (default: 60555)"
             Margin="0,0,0,12" />
 
@@ -133,7 +134,7 @@
             Margin="0,0,0,4"
             Foreground="{DynamicResource PrimaryBrush}" />
         <TextBox
-            Text="{Binding TsDatabasePath, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+            Text="{Binding TsDatabasePath, Mode=TwoWay, UpdateSourceTrigger=LostFocus}"
             ToolTip="Path to targetscheduler.db — leave blank for default: %localappdata%\NINA\TargetScheduler\targetscheduler.db"
             Margin="0,0,0,12" />
 
