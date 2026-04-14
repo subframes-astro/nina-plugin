@@ -8,6 +8,8 @@ using NINA.Core.Utility;
 using NINA.Core.Model.Equipment;
 using NINA.Equipment.Model;
 using NINA.Equipment.Equipment.MyFocuser;
+using NINA.Equipment.Equipment.MyGuider;
+using NINA.Equipment.Equipment.MySafetyMonitor;
 using NINA.Equipment.Interfaces.Mediator;
 using NINA.WPF.Base.Interfaces.Mediator;
 using Subframes.NinaPlugin.Api;
@@ -79,7 +81,8 @@ public sealed class SessionService : IDisposable, IFocuserConsumer, IGuiderConsu
     private volatile bool _lastGuiderWasGuiding;
 
     // Safety state tracking — detect IsSafe transitions via ISafetyMonitorConsumer.
-    private volatile bool? _lastIsSafe;
+    // volatile does not support nullable value types; use int sentinel: -1=unknown, 0=unsafe, 1=safe.
+    private volatile int _lastIsSafeState = -1;
 
     private sealed record HeartbeatSnapshot(string? Filter, double? LatestHfr, double? LatestRmsTotal);
 
@@ -301,7 +304,7 @@ public sealed class SessionService : IDisposable, IFocuserConsumer, IGuiderConsu
             _snapshot = new HeartbeatSnapshot(null, null, null);
             _lastEmittedFilter = null;
             _lastGuiderWasGuiding = false;
-            _lastIsSafe = null;
+            _lastIsSafeState = -1;
             _sessionStartTime = DateTime.UtcNow;
             StartHeartbeatTimer(sessionId);
             StartYieldPollTimer();
@@ -994,7 +997,7 @@ public sealed class SessionService : IDisposable, IFocuserConsumer, IGuiderConsu
                 _snapshot = new HeartbeatSnapshot(null, null, null);
                 _lastEmittedFilter = null;
                 _lastGuiderWasGuiding = false;
-                _lastIsSafe = null;
+                _lastIsSafeState = -1;
                 _sessionStartTime = DateTime.UtcNow;
                 StartHeartbeatTimer(sessionId);
                 StartYieldPollTimer();
@@ -1363,11 +1366,11 @@ public sealed class SessionService : IDisposable, IFocuserConsumer, IGuiderConsu
         {
             if (!deviceInfo.Connected) return;
 
-            var nowSafe   = deviceInfo.IsSafe;
-            var wasSafe   = _lastIsSafe;
-            _lastIsSafe   = nowSafe;
+            var nowSafe       = deviceInfo.IsSafe;
+            var prevSafeState = _lastIsSafeState;
+            _lastIsSafeState  = nowSafe ? 1 : 0;
 
-            if (wasSafe == null || wasSafe.Value == nowSafe) return; // No change or first reading.
+            if (prevSafeState == -1 || (prevSafeState == 1) == nowSafe) return; // No change or first reading.
 
             var eventType = nowSafe ? "safety_safe" : "safety_unsafe";
             _ = _apiClient.PostEventAsync(new EventRequest
