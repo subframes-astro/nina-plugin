@@ -27,7 +27,7 @@ namespace Subframes.NinaPlugin;
 /// Thread safety: the active session ID is stored in a volatile field; the
 /// event handler fires on NINA's internal thread pool so we must not block.
 /// </summary>
-public sealed class SessionService : IDisposable, IFocuserConsumer
+public sealed class SessionService : IDisposable, IFocuserConsumer, IGuiderConsumer, ISafetyMonitorConsumer
 {
     private readonly IImageSaveMediator _imageSaveMediator;
     private readonly SubframesClient _apiClient;
@@ -72,6 +72,15 @@ public sealed class SessionService : IDisposable, IFocuserConsumer
     private Timer? _yieldPollTimer;
     private Dictionary<int, string>? _prevItemStatuses;
 
+    // Filter change tracking — compare per-frame filter to detect transitions.
+    private volatile string? _lastEmittedFilter;
+
+    // Guiding state tracking — detect start/stop transitions via IGuiderConsumer.
+    private volatile bool _lastGuiderWasGuiding;
+
+    // Safety state tracking — detect IsSafe transitions via ISafetyMonitorConsumer.
+    private volatile bool? _lastIsSafe;
+
     private sealed record HeartbeatSnapshot(string? Filter, double? LatestHfr, double? LatestRmsTotal);
 
     /// <summary>Replace non-finite doubles (NaN, ±Infinity) with null so JSON serialization never throws.</summary>
@@ -85,6 +94,20 @@ public sealed class SessionService : IDisposable, IFocuserConsumer
     private static PropertyInfo? _eccentricityProp;
     private static bool _fwhmResolved;
     private static bool _eccentricityResolved;
+
+    // ── IImageStatistics reflection cache ────────────────────────────────────
+    // IImageStatistics is on NINA.Image which may not ship with all builds or may
+    // have varying property names.  Use reflection with a per-frame cache so we
+    // never cause a compile error or a hard crash on unavailable types.
+    private static PropertyInfo? _statsMeanProp;
+    private static PropertyInfo? _statsMedianProp;
+    private static PropertyInfo? _statsStDevProp;
+    private static PropertyInfo? _statsMadProp;
+    private static PropertyInfo? _statsMinProp;
+    private static PropertyInfo? _statsMaxProp;
+    private static PropertyInfo? _statsBitDepthProp;
+    private static bool _statsResolved;
+    private static PropertyInfo? _imageSavedStatsProp; // ImageSavedEventArgs.Statistics
 
     /// <summary>
     /// Reads a <c>double</c> property from <paramref name="obj"/> by reflection, trying each
@@ -112,6 +135,73 @@ public sealed class SessionService : IDisposable, IFocuserConsumer
         if (cached == null) return null;
         var val = cached.GetValue(obj);
         return val is double d ? d : null;
+    }
+
+    /// <summary>
+    /// Reads image statistics from <paramref name="e"/> via reflection.
+    /// Resolves the ImageSavedEventArgs.Statistics property and its sub-properties once
+    /// and caches them.  Returns a tuple of (mean, median, stdev, mad, min, max, bitDepth),
+    /// all nullable. All values are null when statistics are unavailable.
+    /// </summary>
+    private static (double? mean, double? median, double? stdev, double? mad, int? min, int? max, int? bitDepth)
+        ReadImageStatistics(object e)
+    {
+        try
+        {
+            // Resolve ImageSavedEventArgs.Statistics property once.
+            if (_imageSavedStatsProp == null && !_statsResolved)
+            {
+                _imageSavedStatsProp = e.GetType().GetProperty("Statistics", BindingFlags.Public | BindingFlags.Instance);
+                _statsResolved = true;
+            }
+
+            var stats = _imageSavedStatsProp?.GetValue(e);
+            if (stats == null) return default;
+
+            var statsType = stats.GetType();
+
+            double? ReadDouble(ref PropertyInfo? cache, params string[] names)
+            {
+                if (cache == null)
+                {
+                    foreach (var name in names)
+                    {
+                        cache = statsType.GetProperty(name, BindingFlags.Public | BindingFlags.Instance);
+                        if (cache != null) break;
+                    }
+                }
+                var v = cache?.GetValue(stats);
+                return v is double d && double.IsFinite(d) ? d : null;
+            }
+
+            int? ReadInt(ref PropertyInfo? cache, params string[] names)
+            {
+                if (cache == null)
+                {
+                    foreach (var name in names)
+                    {
+                        cache = statsType.GetProperty(name, BindingFlags.Public | BindingFlags.Instance);
+                        if (cache != null) break;
+                    }
+                }
+                var v = cache?.GetValue(stats);
+                return v switch { int i => i, ushort us => (int)us, _ => null };
+            }
+
+            var mean    = ReadDouble(ref _statsMeanProp,    "Mean");
+            var median  = ReadDouble(ref _statsMedianProp,  "Median");
+            var stdev   = ReadDouble(ref _statsStDevProp,   "StDev");
+            var mad     = ReadDouble(ref _statsMadProp,     "MedianAbsoluteDeviation", "MAD");
+            var min     = ReadInt(ref _statsMinProp,        "Min");
+            var max     = ReadInt(ref _statsMaxProp,        "Max");
+            var bitDep  = ReadInt(ref _statsBitDepthProp,   "BitDepth");
+
+            return (mean, median, stdev, mad, min, max, bitDep);
+        }
+        catch
+        {
+            return default;
+        }
     }
 
     /// <summary>Returns the safety monitor's IsSafe value when connected, or null if unavailable.</summary>
@@ -209,6 +299,9 @@ public sealed class SessionService : IDisposable, IFocuserConsumer
             _activeSessionTargetId = null;
             _sessionStatus = "active";
             _snapshot = new HeartbeatSnapshot(null, null, null);
+            _lastEmittedFilter = null;
+            _lastGuiderWasGuiding = false;
+            _lastIsSafe = null;
             _sessionStartTime = DateTime.UtcNow;
             StartHeartbeatTimer(sessionId);
             StartYieldPollTimer();
@@ -694,6 +787,32 @@ public sealed class SessionService : IDisposable, IFocuserConsumer
             }
             catch { /* rotator not available — leave null */ }
 
+            // Read telescope altitude and azimuth at frame capture time.
+            double? altitude = null, azimuth = null;
+            try
+            {
+                var scopeInfo = _telescopeMediator?.GetInfo();
+                if (scopeInfo is { Connected: true })
+                {
+                    altitude = Finite(scopeInfo.Altitude);
+                    azimuth  = Finite(scopeInfo.Azimuth);
+                }
+            }
+            catch { /* telescope not available — leave null */ }
+
+            // Read focuser position at frame capture time.
+            int? focuserPosition = null;
+            try
+            {
+                var focuserInfo = _focuserMediator?.GetInfo();
+                if (focuserInfo is { Connected: true })
+                    focuserPosition = focuserInfo.Position;
+            }
+            catch { /* focuser not available — leave null */ }
+
+            // Read image statistics via reflection (Mean, Median, StDev, MAD, Min, Max, BitDepth).
+            var (meanAdu, medianAdu, stdevAdu, madAdu, minAdu, maxAdu, bitDepth) = ReadImageStatistics(e);
+
             // Update heartbeat snapshot atomically so the timer always reads consistent state.
             _snapshot = new HeartbeatSnapshot(filter, Finite(hfr), rmsTotal);
 
@@ -706,6 +825,22 @@ public sealed class SessionService : IDisposable, IFocuserConsumer
                     new UpdateSessionStatusRequest { SessionId = sessionId, Status = "active" },
                     CancellationToken.None);
             }
+
+            // Detect filter change and emit an event before updating the last-filter tracker.
+            var lastFilter = _lastEmittedFilter;
+            if (filter != null && lastFilter != null
+                && !string.Equals(filter, lastFilter, StringComparison.OrdinalIgnoreCase))
+            {
+                _ = _apiClient.PostEventAsync(new EventRequest
+                {
+                    SessionId = sessionId,
+                    EventType = "filter_change",
+                    Timestamp = capturedAt,
+                    Metadata  = new Dictionary<string, object?> { ["from"] = lastFilter, ["to"] = filter },
+                }, CancellationToken.None);
+                Logger.Debug($"[Subframes] Filter change event: {lastFilter} → {filter}");
+            }
+            if (filter != null) _lastEmittedFilter = filter;
 
             var frame = new FrameInput
             {
@@ -726,13 +861,23 @@ public sealed class SessionService : IDisposable, IFocuserConsumer
                 RmsRa           = rmsRa,
                 RmsDec          = rmsDec,
                 RmsTotal        = rmsTotal,
+                MeanAdu         = meanAdu,
+                MedianAdu       = medianAdu,
+                StdevAdu        = stdevAdu,
+                MinAdu          = minAdu,
+                MaxAdu          = maxAdu,
+                MadAdu          = madAdu,
+                BitDepth        = bitDepth,
                 AmbientTemp     = ambientTemp,
                 Humidity        = humidity,
                 DewPoint        = dewPoint,
                 WindSpeed       = windSpeed,
-                CloudCover       = cloudCover,
-                SkyQuality       = skyQuality,
-                RotatorPosition  = rotatorPosition,
+                CloudCover      = cloudCover,
+                SkyQuality      = skyQuality,
+                RotatorPosition = rotatorPosition,
+                Altitude        = altitude,
+                Azimuth         = azimuth,
+                FocuserPosition = focuserPosition,
             };
 
             // Write to local SQLite cache — never blocks, never throws.
@@ -847,6 +992,9 @@ public sealed class SessionService : IDisposable, IFocuserConsumer
                 Logger.Info($"[Subframes] Auto-session started: target='{targetName}' (trigger: {reason})");
                 _currentTarget = targetName;
                 _snapshot = new HeartbeatSnapshot(null, null, null);
+                _lastEmittedFilter = null;
+                _lastGuiderWasGuiding = false;
+                _lastIsSafe = null;
                 _sessionStartTime = DateTime.UtcNow;
                 StartHeartbeatTimer(sessionId);
                 StartYieldPollTimer();
@@ -1044,11 +1192,11 @@ public sealed class SessionService : IDisposable, IFocuserConsumer
         }
     }
 
-    // ── Session event consumers (autofocus + meridian flip) ──────────────────
+    // ── Session event consumers (autofocus + meridian flip + guiding + safety) ─
 
     /// <summary>
-    /// Register as a focuser consumer and subscribe to the AfterMeridianFlip event
-    /// so we can send autofocus and meridian-flip events to the backend.
+    /// Register as focuser, guider, and safety-monitor consumers, and subscribe to
+    /// the AfterMeridianFlip event, so we can emit session events to the backend.
     /// Called at the start of each session.
     /// </summary>
     private void RegisterSessionEventConsumers()
@@ -1073,10 +1221,30 @@ public sealed class SessionService : IDisposable, IFocuserConsumer
         {
             Logger.Warning($"[Subframes] Could not subscribe to AfterMeridianFlip: {ex.Message}");
         }
+
+        try
+        {
+            _guiderMediator?.RegisterConsumer(this);
+            Logger.Debug("[Subframes] Registered as IGuiderConsumer for guiding start/stop events.");
+        }
+        catch (Exception ex)
+        {
+            Logger.Warning($"[Subframes] Could not register as guider consumer: {ex.Message}");
+        }
+
+        try
+        {
+            _safetyMonitorMediator?.RegisterConsumer(this);
+            Logger.Debug("[Subframes] Registered as ISafetyMonitorConsumer for safety events.");
+        }
+        catch (Exception ex)
+        {
+            Logger.Warning($"[Subframes] Could not register as safety monitor consumer: {ex.Message}");
+        }
     }
 
     /// <summary>
-    /// Unregister focuser consumer and unsubscribe from AfterMeridianFlip.
+    /// Unregister all session event consumers and unsubscribe from events.
     /// Called at the end of each session (or on clear/dispose).
     /// </summary>
     private void UnregisterSessionEventConsumers()
@@ -1089,6 +1257,12 @@ public sealed class SessionService : IDisposable, IFocuserConsumer
             if (_telescopeMediator is not null)
                 _telescopeMediator.AfterMeridianFlip -= OnAfterMeridianFlip;
         }
+        catch { /* ignore */ }
+
+        try { _guiderMediator?.RemoveConsumer(this); }
+        catch { /* ignore */ }
+
+        try { _safetyMonitorMediator?.RemoveConsumer(this); }
         catch { /* ignore */ }
     }
 
@@ -1131,11 +1305,85 @@ public sealed class SessionService : IDisposable, IFocuserConsumer
         }
     }
 
-    /// <summary>No-op — we don't need device info updates.</summary>
+    /// <summary>No-op — focuser device info updates are not needed for events.</summary>
     public void UpdateDeviceInfo(FocuserInfo deviceInfo) { }
 
     /// <summary>No-op — we don't need user-focused position updates.</summary>
     public void UpdateUserFocused(FocuserInfo info) { }
+
+    // ── IGuiderConsumer ──────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Called by NINA whenever the guider state changes.
+    /// Detects transitions between guiding/stopped and emits guiding_start / guiding_stop events.
+    /// </summary>
+    public void UpdateDeviceInfo(GuiderInfo deviceInfo)
+    {
+        var sessionId = _activeSessionId;
+        if (sessionId is null) return;
+
+        try
+        {
+            var isNowGuiding = deviceInfo.Connected && deviceInfo.IsGuiding;
+            var wasGuiding   = _lastGuiderWasGuiding;
+
+            if (isNowGuiding == wasGuiding) return; // No state change — nothing to emit.
+            _lastGuiderWasGuiding = isNowGuiding;
+
+            var eventType = isNowGuiding ? "guiding_start" : "guiding_stop";
+            _ = _apiClient.PostEventAsync(new EventRequest
+            {
+                SessionId = sessionId,
+                EventType = eventType,
+                Timestamp = DateTime.UtcNow.ToString("o"),
+            }, CancellationToken.None);
+            Logger.Debug($"[Subframes] {eventType} event queued: session={sessionId}");
+        }
+        catch (Exception ex)
+        {
+            Logger.Warning($"[Subframes] IGuiderConsumer.UpdateDeviceInfo failed: {ex.Message}");
+        }
+    }
+
+    /// <summary>No-op — individual guide steps are not used for session events.</summary>
+    public void UpdateGuideSteps(GuideStepsChangedEvent guideStepsChangedEvent) { }
+
+    // ── ISafetyMonitorConsumer ───────────────────────────────────────────────
+
+    /// <summary>
+    /// Called by NINA whenever the safety monitor state changes.
+    /// Detects IsSafe transitions and emits safety_safe / safety_unsafe events.
+    /// </summary>
+    public void UpdateDeviceInfo(SafetyMonitorInfo deviceInfo)
+    {
+        var sessionId = _activeSessionId;
+        if (sessionId is null) return;
+
+        try
+        {
+            if (!deviceInfo.Connected) return;
+
+            var nowSafe   = deviceInfo.IsSafe;
+            var wasSafe   = _lastIsSafe;
+            _lastIsSafe   = nowSafe;
+
+            if (wasSafe == null || wasSafe.Value == nowSafe) return; // No change or first reading.
+
+            var eventType = nowSafe ? "safety_safe" : "safety_unsafe";
+            _ = _apiClient.PostEventAsync(new EventRequest
+            {
+                SessionId = sessionId,
+                EventType = eventType,
+                Timestamp = DateTime.UtcNow.ToString("o"),
+                Metadata  = new Dictionary<string, object?> { ["isSafe"] = nowSafe },
+            }, CancellationToken.None);
+            Logger.Debug($"[Subframes] {eventType} event queued: session={sessionId} isSafe={nowSafe}");
+        }
+        catch (Exception ex)
+        {
+            Logger.Warning($"[Subframes] ISafetyMonitorConsumer.UpdateDeviceInfo failed: {ex.Message}");
+        }
+    }
 
     // ── Meridian flip handler ────────────────────────────────────────────────
 
