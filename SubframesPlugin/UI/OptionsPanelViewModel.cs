@@ -72,8 +72,7 @@ public partial class OptionsPanelViewModel : ObservableObject
     /// <summary>Available TS profiles, populated when TS is active.</summary>
     public ObservableCollection<TsProfileInfo> TsProfiles { get; } = new();
 
-    // Prevents auto-save and heartbeat triggers from firing during ViewModel initialization.
-    private bool _initialized;
+    // Prevents triggering heartbeats during ViewModel initialization.
     private bool _profileSelectorInitialized;
 
     public OptionsPanelViewModel(SubframesPlugin plugin)
@@ -93,9 +92,6 @@ public partial class OptionsPanelViewModel : ObservableObject
         TsApiPort = _options.TsApiPort;
         TsDatabasePath = _options.TsDatabasePath;
 
-        // Options are fully loaded — auto-save callbacks are now live.
-        _initialized = true;
-
         // Subscribe to profile list updates from the plugin's preview loop.
         plugin.TsProfilesUpdated += OnTsProfilesUpdated;
 
@@ -114,16 +110,6 @@ public partial class OptionsPanelViewModel : ObservableObject
     [RelayCommand]
     private void Save()
     {
-        AutoSave();
-        StatusMessage = "Settings saved.";
-    }
-
-    /// <summary>
-    /// Persists the current settings to disk. Called automatically when the user leaves a
-    /// field or control, and explicitly via <see cref="SaveCommand"/>.
-    /// </summary>
-    internal void AutoSave()
-    {
         _options.ApiBaseUrl = ApiBaseUrl.Trim();
         _options.ApiKey = ApiKey.Trim();
         _options.IsEnabled = IsEnabled;
@@ -133,39 +119,8 @@ public partial class OptionsPanelViewModel : ObservableObject
         _options.TsDatabasePath = TsDatabasePath.Trim();
         _options.Save();
         _plugin.ApplyOptionsChange();
+        StatusMessage = "Settings saved.";
         Logger.Info($"[Subframes] Settings saved — API URL: {_options.ApiBaseUrl}  Enabled: {_options.IsEnabled}  Debug: {_options.IsDebugEnabled}");
-    }
-
-    // ── Auto-save callbacks ───────────────────────────────────────────────────
-
-    partial void OnIsEnabledChanged(bool value)
-    {
-        if (_initialized) AutoSave();
-    }
-
-    partial void OnIsDebugEnabledChanged(bool value)
-    {
-        if (_initialized) AutoSave();
-    }
-
-    partial void OnApiBaseUrlChanged(string value)
-    {
-        if (_initialized) AutoSave();
-    }
-
-    partial void OnInstanceNameChanged(string value)
-    {
-        if (_initialized) AutoSave();
-    }
-
-    partial void OnTsApiPortChanged(int value)
-    {
-        if (_initialized) AutoSave();
-    }
-
-    partial void OnTsDatabasePathChanged(string value)
-    {
-        if (_initialized) AutoSave();
     }
 
     [RelayCommand]

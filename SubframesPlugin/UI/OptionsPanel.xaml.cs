@@ -23,10 +23,4 @@ public partial class OptionsPanel : UserControl
         if (DataContext is OptionsPanelViewModel vm)
             vm.ApiKey = ApiKeyBox.Password;
     }
-
-    private void ApiKeyBox_LostFocus(object sender, RoutedEventArgs e)
-    {
-        if (DataContext is OptionsPanelViewModel vm)
-            vm.AutoSave();
-    }
 }
