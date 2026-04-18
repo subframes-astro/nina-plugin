@@ -1291,7 +1291,7 @@ public sealed class SessionService : IDisposable, IFocuserConsumer, IGuiderConsu
                 sessionId,
                 autofocusInfo.Filter,
                 Finite(autofocusInfo.Temperature),
-                autofocusInfo.Position);
+                (int)autofocusInfo.Position);
 
             Logger.Info($"[Subframes] UpdateEndAutoFocusRun called: session={sessionId} filter={autofocusInfo.Filter} position={autofocusInfo.Position} — posting autofocus event");
             _ = _apiClient.PostEventAsync(request, CancellationToken.None);
