@@ -1207,7 +1207,7 @@ public sealed class SessionService : IDisposable, IFocuserConsumer, IGuiderConsu
         try
         {
             _focuserMediator?.RegisterConsumer(this);
-            Logger.Debug("[Subframes] Registered as IFocuserConsumer for autofocus events.");
+            Logger.Info("[Subframes] Registered as IFocuserConsumer — UpdateEndAutoFocusRun will be called by NINA after each autofocus run.");
         }
         catch (Exception ex)
         {
@@ -1287,20 +1287,14 @@ public sealed class SessionService : IDisposable, IFocuserConsumer, IGuiderConsu
 
         try
         {
-            var request = new EventRequest
-            {
-                SessionId = sessionId,
-                EventType = "autofocus",
-                Timestamp = DateTime.UtcNow.ToString("o"),
-                Metadata  = new Dictionary<string, object?>
-                {
-                    ["filter"]      = autofocusInfo.Filter,
-                    ["temperature"] = Finite(autofocusInfo.Temperature),
-                    ["position"]    = autofocusInfo.Position,
-                },
-            };
+            var request = AutofocusEventBuilder.Build(
+                sessionId,
+                autofocusInfo.Filter,
+                Finite(autofocusInfo.Temperature),
+                autofocusInfo.Position);
+
+            Logger.Info($"[Subframes] UpdateEndAutoFocusRun called: session={sessionId} filter={autofocusInfo.Filter} position={autofocusInfo.Position} — posting autofocus event");
             _ = _apiClient.PostEventAsync(request, CancellationToken.None);
-            Logger.Debug($"[Subframes] Autofocus event queued: session={sessionId} filter={autofocusInfo.Filter} position={autofocusInfo.Position}");
         }
         catch (Exception ex)
         {
