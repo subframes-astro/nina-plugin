@@ -157,7 +157,7 @@ public partial class StartSessionItem : SequenceItem, IValidatable
             InstanceName     = string.IsNullOrWhiteSpace(options.InstanceName) ? null : options.InstanceName,
             LocationLat      = hasLocation ? lat : null,
             LocationLon      = hasLocation ? lon : null,
-            LocationLabel    = hasLocation ? _profileService.ActiveProfile.Name : null,
+            LocationLabel    = hasLocation ? _profileService.ActiveProfile?.Name : null,
             PixelSizeMicrons = pixelSizeMicrons,
             SensorWidthPx    = sensorWidthPx,
             SensorHeightPx   = sensorHeightPx,
