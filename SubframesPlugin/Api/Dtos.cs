@@ -679,6 +679,15 @@ public sealed class StationLocationDto
     [JsonPropertyName("elevationMeters")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public double? ElevationMeters { get; init; }
+
+    /// <summary>
+    /// IANA timezone identifier for the host machine (e.g. "Europe/London").
+    /// Empty string when conversion from the Windows timezone ID failed;
+    /// the backend falls back to UTC in that case.
+    /// </summary>
+    [JsonPropertyName("timezone")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Timezone { get; init; }
 }
 
 // ── Responses ────────────────────────────────────────────────────────────────

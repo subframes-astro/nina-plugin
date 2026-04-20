@@ -826,6 +826,7 @@ public class SubframesPlugin : PluginBase, IPluginManifest, IPartImportsSatisfie
                 Longitude       = DoubleExtensions.Finite(ast?.Longitude),
                 Label           = profile?.Name,
                 ElevationMeters = DoubleExtensions.Finite(ast?.Elevation),
+                Timezone        = TimezoneHelper.ResolveIanaTimezone() is string tz && tz.Length > 0 ? tz : null,
             };
         }
         catch (Exception ex)

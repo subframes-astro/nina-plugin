@@ -89,33 +89,8 @@ public sealed class SessionService : IDisposable, IFocuserConsumer, IGuiderConsu
     /// <summary>Replace non-finite doubles (NaN, ±Infinity) with null so JSON serialization never throws.</summary>
     private static double? Finite(double? v) => v is double d && double.IsFinite(d) ? v : null;
 
-    /// <summary>
-    /// Returns the IANA timezone identifier for the local machine
-    /// (e.g. <c>"America/New_York"</c>), or an empty string when conversion
-    /// from the Windows timezone ID fails.  Never throws.
-    /// </summary>
-    private static string ResolveIanaTimezone()
-    {
-        try
-        {
-            var windowsId = TimeZoneInfo.Local.Id;
-            if (TimeZoneInfo.TryConvertWindowsIdToIanaId(windowsId, out var ianaId)
-                && !string.IsNullOrEmpty(ianaId))
-                return ianaId;
-
-            // On Linux/macOS the ID is already IANA — return it directly.
-            if (windowsId.Contains('/'))
-                return windowsId;
-
-            Logger.Warning($"[Subframes] Could not convert Windows timezone '{windowsId}' to IANA — sending empty string.");
-            return string.Empty;
-        }
-        catch (Exception ex)
-        {
-            Logger.Warning($"[Subframes] ResolveIanaTimezone failed: {ex.Message} — sending empty string.");
-            return string.Empty;
-        }
-    }
+    // Delegate to the shared TimezoneHelper to avoid duplication.
+    private static string ResolveIanaTimezone() => TimezoneHelper.ResolveIanaTimezone();
 
     // ── Hocus Focus reflection cache ─────────────────────────────────────────
     // FWHM and Eccentricity are not on IStarDetectionAnalysis in stock NINA 3.x;
