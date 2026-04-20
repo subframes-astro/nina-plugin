@@ -70,6 +70,15 @@ public sealed class StartSessionRequest
     [JsonPropertyName("plannedTargets")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public List<PlannedTargetInput>? PlannedTargets { get; init; }
+
+    /// <summary>
+    /// IANA timezone identifier for the host machine (e.g. "America/New_York").
+    /// Empty string when conversion from the Windows timezone ID failed;
+    /// the backend falls back to UTC in that case.
+    /// </summary>
+    [JsonPropertyName("timezone")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? Timezone { get; init; }
 }
 
 /// <summary>A single planned target sourced from Target Scheduler.</summary>
