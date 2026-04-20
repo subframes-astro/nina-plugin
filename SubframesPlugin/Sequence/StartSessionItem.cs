@@ -8,6 +8,7 @@ using NINA.Sequencer.Container;
 using NINA.Sequencer.SequenceItem;
 using NINA.Sequencer.Validations;
 using Subframes.NinaPlugin.Api;
+using Subframes.NinaPlugin;
 
 namespace Subframes.NinaPlugin.Sequence;
 
@@ -317,40 +318,8 @@ public partial class StartSessionItem : SequenceItem, IValidatable
 
     // ── Timezone resolution ─────────────────────────────────────────────────
 
-    /// <summary>
-    /// Returns the IANA timezone identifier for the local machine
-    /// (e.g. <c>"America/New_York"</c>), or an empty string when the
-    /// Windows timezone ID cannot be converted.  The backend interprets an
-    /// empty string as "use UTC".  Never throws.
-    /// </summary>
-    private static string ResolveIanaTimezone()
-    {
-        try
-        {
-            var windowsId = TimeZoneInfo.Local.Id;
-            if (TimeZoneInfo.TryConvertWindowsIdToIanaId(windowsId, out var ianaId)
-                && !string.IsNullOrEmpty(ianaId))
-            {
-                Logger.Debug($"[Subframes] Resolved IANA timezone: '{ianaId}' (Windows ID: '{windowsId}')");
-                return ianaId;
-            }
-
-            // On Linux/macOS NINA builds the ID is already IANA — return it directly.
-            if (windowsId.Contains('/'))
-            {
-                Logger.Debug($"[Subframes] Timezone ID appears to be IANA already: '{windowsId}'");
-                return windowsId;
-            }
-
-            Logger.Warning($"[Subframes] Could not convert Windows timezone '{windowsId}' to IANA — sending empty string.");
-            return string.Empty;
-        }
-        catch (Exception ex)
-        {
-            Logger.Warning($"[Subframes] ResolveIanaTimezone failed: {ex.Message} — sending empty string.");
-            return string.Empty;
-        }
-    }
+    // Delegate to the shared TimezoneHelper to avoid duplication.
+    private static string ResolveIanaTimezone() => TimezoneHelper.ResolveIanaTimezone();
 
     // ── IValidatable ─────────────────────────────────────────────────────────
 
