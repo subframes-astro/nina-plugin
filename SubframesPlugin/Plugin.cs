@@ -225,6 +225,11 @@ public class SubframesPlugin : PluginBase, IPluginManifest, IPartImportsSatisfie
             _sequenceEventsSubscribed = true;
             _sessionService.ActiveTargetResolver = ResolveActiveTarget;
             _sessionService.SequenceItemsProvider = GetSequenceCurrentItems;
+            _sessionService.ActiveProfileNameResolver = () =>
+            {
+                try { return _profileService.ActiveProfile?.Name; }
+                catch { return null; }
+            };
             Logger.Debug("[Subframes] Subscribed to ISequenceMediator.SequenceFinished.");
             return true;
         }
@@ -334,6 +339,7 @@ public class SubframesPlugin : PluginBase, IPluginManifest, IPartImportsSatisfie
             }
             _sessionService.ActiveTargetResolver = null;
             _sessionService.SequenceItemsProvider = null;
+            _sessionService.ActiveProfileNameResolver = null;
             _sessionService.SessionStarted -= OnSessionStarted;
             UnsubscribeFromContainerEvents();
             StopStationHeartbeat();

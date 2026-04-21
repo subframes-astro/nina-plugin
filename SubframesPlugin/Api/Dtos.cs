@@ -51,6 +51,15 @@ public sealed class StartSessionRequest
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? InstanceName { get; init; }
 
+    /// <summary>
+    /// The name of the active NINA equipment profile at session start.
+    /// Sent as a fallback for backend session tagging when the profile ID is not set.
+    /// Always populated when the active profile name is available.
+    /// </summary>
+    [JsonPropertyName("equipmentProfileName")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? EquipmentProfileName { get; init; }
+
     [JsonPropertyName("pixelSizeMicrons")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public double? PixelSizeMicrons { get; init; }

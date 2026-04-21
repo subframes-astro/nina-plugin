@@ -258,6 +258,12 @@ public sealed class SessionService : IDisposable, IFocuserConsumer, IGuiderConsu
     public Func<(string? name, double ra, double dec)?>? ActiveTargetResolver { get; set; }
 
     /// <summary>
+    /// Set by Plugin.cs to read the active NINA equipment profile name at session-open time.
+    /// Returns null when the profile service is unavailable.
+    /// </summary>
+    public Func<string?>? ActiveProfileNameResolver { get; set; }
+
+    /// <summary>
     /// Raised after a new session is successfully started via <see cref="StartSessionAsync"/>.
     /// Plugin.cs subscribes to this event to fire an immediate station heartbeat so the
     /// website reflects equipment data and imaging status without waiting for the 5-minute timer.
@@ -631,16 +637,20 @@ public sealed class SessionService : IDisposable, IFocuserConsumer, IGuiderConsu
 
             var plannedTargets = TsPlannedTargetReader.ReadPlannedTargets();
 
+            string? profileName = null;
+            try { profileName = ActiveProfileNameResolver?.Invoke(); } catch { /* best effort */ }
+
             var request = new StartSessionRequest
             {
-                TargetName     = resolvedTarget,
-                TargetRa       = targetRa,
-                TargetDec      = targetDec,
-                StartTime      = DateTime.UtcNow.ToString("o"),
-                InstanceId     = string.IsNullOrWhiteSpace(options.InstanceId) ? null : options.InstanceId,
-                InstanceName   = string.IsNullOrWhiteSpace(options.InstanceName) ? null : options.InstanceName,
-                PlannedTargets = plannedTargets,
-                Timezone       = ResolveIanaTimezone(),
+                TargetName            = resolvedTarget,
+                TargetRa              = targetRa,
+                TargetDec             = targetDec,
+                StartTime             = DateTime.UtcNow.ToString("o"),
+                InstanceId            = string.IsNullOrWhiteSpace(options.InstanceId) ? null : options.InstanceId,
+                InstanceName          = string.IsNullOrWhiteSpace(options.InstanceName) ? null : options.InstanceName,
+                EquipmentProfileName  = string.IsNullOrWhiteSpace(profileName) ? null : profileName,
+                PlannedTargets        = plannedTargets,
+                Timezone              = ResolveIanaTimezone(),
             };
 
             var sessionId = await _apiClient.StartSessionAsync(request, CancellationToken.None);
@@ -979,15 +989,19 @@ public sealed class SessionService : IDisposable, IFocuserConsumer, IGuiderConsu
             if (existing is not null)
                 await EndSessionAsync(CancellationToken.None);
 
+            string? profileName = null;
+            try { profileName = ActiveProfileNameResolver?.Invoke(); } catch { /* best effort */ }
+
             var request = new StartSessionRequest
             {
-                TargetName   = targetName,
-                TargetRa     = e.MetaData?.Target?.Coordinates?.RA ?? 0.0,
-                TargetDec    = e.MetaData?.Target?.Coordinates?.Dec ?? 0.0,
-                StartTime    = DateTime.UtcNow.ToString("o"),
-                InstanceId   = string.IsNullOrWhiteSpace(options.InstanceId) ? null : options.InstanceId,
-                InstanceName = string.IsNullOrWhiteSpace(options.InstanceName) ? null : options.InstanceName,
-                Timezone     = ResolveIanaTimezone(),
+                TargetName           = targetName,
+                TargetRa             = e.MetaData?.Target?.Coordinates?.RA ?? 0.0,
+                TargetDec            = e.MetaData?.Target?.Coordinates?.Dec ?? 0.0,
+                StartTime            = DateTime.UtcNow.ToString("o"),
+                InstanceId           = string.IsNullOrWhiteSpace(options.InstanceId) ? null : options.InstanceId,
+                InstanceName         = string.IsNullOrWhiteSpace(options.InstanceName) ? null : options.InstanceName,
+                EquipmentProfileName = string.IsNullOrWhiteSpace(profileName) ? null : profileName,
+                Timezone             = ResolveIanaTimezone(),
             };
 
             var sessionId = await _apiClient.StartSessionAsync(request, CancellationToken.None);

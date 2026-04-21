@@ -152,21 +152,22 @@ public partial class StartSessionItem : SequenceItem, IValidatable
 
         var request = new StartSessionRequest
         {
-            TargetName       = targetName,
-            TargetRa         = resolvedRa,
-            TargetDec        = resolvedDec,
-            StartTime        = DateTime.UtcNow.ToString("o"),
-            InstanceId       = string.IsNullOrWhiteSpace(options.InstanceId) ? null : options.InstanceId,
-            InstanceName     = string.IsNullOrWhiteSpace(options.InstanceName) ? null : options.InstanceName,
-            LocationLat      = hasLocation ? lat : null,
-            LocationLon      = hasLocation ? lon : null,
-            LocationLabel    = hasLocation ? _profileService.ActiveProfile?.Name : null,
-            PixelSizeMicrons = pixelSizeMicrons,
-            SensorWidthPx    = sensorWidthPx,
-            SensorHeightPx   = sensorHeightPx,
-            FocalLengthMm    = focalLengthMm,
-            PlannedTargets   = plannedTargets,
-            Timezone         = timezone,
+            TargetName           = targetName,
+            TargetRa             = resolvedRa,
+            TargetDec            = resolvedDec,
+            StartTime            = DateTime.UtcNow.ToString("o"),
+            InstanceId           = string.IsNullOrWhiteSpace(options.InstanceId) ? null : options.InstanceId,
+            InstanceName         = string.IsNullOrWhiteSpace(options.InstanceName) ? null : options.InstanceName,
+            EquipmentProfileName = _profileService.ActiveProfile?.Name is string pn && !string.IsNullOrWhiteSpace(pn) ? pn : null,
+            LocationLat          = hasLocation ? lat : null,
+            LocationLon          = hasLocation ? lon : null,
+            LocationLabel        = hasLocation ? _profileService.ActiveProfile?.Name : null,
+            PixelSizeMicrons     = pixelSizeMicrons,
+            SensorWidthPx        = sensorWidthPx,
+            SensorHeightPx       = sensorHeightPx,
+            FocalLengthMm        = focalLengthMm,
+            PlannedTargets       = plannedTargets,
+            Timezone             = timezone,
         };
 
         var sessionId = await _sessionService.StartSessionAsync(request, ct);
