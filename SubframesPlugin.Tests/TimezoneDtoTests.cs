@@ -77,4 +77,37 @@ public sealed class TimezoneDtoTests
 
         Assert.DoesNotContain("\"timezone\"", json);
     }
+
+    // ── EquipmentProfileName ──────────────────────────────────────────────────
+
+    [Fact]
+    public void StartSessionRequest_EquipmentProfileName_SerializesWithCorrectKey()
+    {
+        var request = new StartSessionRequest
+        {
+            TargetName           = "M42",
+            StartTime            = "2026-04-20T22:00:00Z",
+            EquipmentProfileName = "My Imaging Rig",
+        };
+
+        var json = JsonSerializer.Serialize(request);
+
+        Assert.Contains("\"equipmentProfileName\"", json);
+        Assert.Contains("\"My Imaging Rig\"", json);
+    }
+
+    [Fact]
+    public void StartSessionRequest_EquipmentProfileName_OmittedWhenNull()
+    {
+        var request = new StartSessionRequest
+        {
+            TargetName           = "M42",
+            StartTime            = "2026-04-20T22:00:00Z",
+            EquipmentProfileName = null,
+        };
+
+        var json = JsonSerializer.Serialize(request);
+
+        Assert.DoesNotContain("\"equipmentProfileName\"", json);
+    }
 }
