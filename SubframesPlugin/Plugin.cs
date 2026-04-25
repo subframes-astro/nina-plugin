@@ -788,6 +788,9 @@ public class SubframesPlugin : PluginBase, IPluginManifest, IPartImportsSatisfie
             string? filterWheelName = null;
             try { filterWheelName = _filterWheelMediator.GetInfo().Name; } catch { }
 
+            string? mountName = null;
+            try { var i = _telescopeMediator.GetInfo(); if (i.Connected) mountName = i.Name; } catch { }
+
             string? focuserName = null, rotatorName = null, guiderName = null,
                     flatDeviceName = null, safetyMonitorName = null, weatherStationName = null;
             try { var i = _focuserMediator.GetInfo();       if (i.Connected) focuserName        = i.Name; } catch { }
@@ -806,7 +809,7 @@ public class SubframesPlugin : PluginBase, IPluginManifest, IPartImportsSatisfie
                 SensorWidth        = sensorWidth,
                 SensorHeight       = sensorHeight,
                 PixelSize          = DoubleExtensions.Finite(cs?.PixelSize),
-                MountName          = ts?.Name,
+                MountName          = string.IsNullOrEmpty(mountName) ? null : mountName,
                 FilterWheel        = filterWheelName,
                 Filters            = filters is { Count: > 0 } ? filters : null,
                 FocuserName        = string.IsNullOrEmpty(focuserName)       ? null : focuserName,
