@@ -37,6 +37,13 @@ internal sealed class TargetSchedulerDetector : IDisposable
     public int Port => _port;
 
     /// <summary>
+    /// Raised on a thread-pool thread whenever <see cref="CurrentState"/> transitions to a new
+    /// value.  The event argument is the new state string (<c>"none"</c>, <c>"no_api"</c>, or
+    /// <c>"active"</c>).  Handlers must not throw; exceptions are caught and logged.
+    /// </summary>
+    public event EventHandler<string>? StateChanged;
+
+    /// <summary>
     /// Current TS availability state: <c>"none"</c> | <c>"no_api"</c> | <c>"active"</c>.
     /// Safe to read from any thread.
     /// </summary>
@@ -169,6 +176,8 @@ internal sealed class TargetSchedulerDetector : IDisposable
         {
             Logger.Info($"[Subframes] TargetSchedulerDetector: state {_currentState} → {newState}");
             _currentState = newState;
+            try { StateChanged?.Invoke(this, newState); }
+            catch (Exception ex) { Logger.Debug($"[Subframes] TargetSchedulerDetector: StateChanged handler threw: {ex.Message}"); }
         }
     }
 }
