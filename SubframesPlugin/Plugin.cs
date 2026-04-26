@@ -24,7 +24,7 @@ file static class DoubleExtensions
 /// <summary>
 /// Main plugin entry point.  NINA discovers this via MEF ([Export(typeof(IPluginManifest))]).
 /// Manifest properties (Name, Identifier, Author, etc.) are read from assembly attributes
-/// by PluginBase — see SubframesPlugin.csproj and Properties/AssemblyInfo.cs.
+/// by PluginBase - see SubframesPlugin.csproj and Properties/AssemblyInfo.cs.
 /// </summary>
 [Export(typeof(IPluginManifest))]
 [Export(typeof(SubframesPlugin))]
@@ -122,7 +122,7 @@ public class SubframesPlugin : PluginBase, IPluginManifest, IPartImportsSatisfie
         var existing = Interlocked.CompareExchange(ref _primary, this, null);
         if (existing is not null)
         {
-            Logger.Warning("[Subframes] Duplicate plugin instance created by MEF — proxying to primary to prevent duplicate sessions/sync.");
+            Logger.Warning("[Subframes] Duplicate plugin instance created by MEF - proxying to primary to prevent duplicate sessions/sync.");
             _isPrimary = false;
             // Share the primary's service objects so sequence items work.
             _sessionService = existing._sessionService;
@@ -205,8 +205,8 @@ public class SubframesPlugin : PluginBase, IPluginManifest, IPartImportsSatisfie
         if (TrySubscribeSequenceEvents())
             return;
 
-        // SequenceMediator exists but internals aren't ready yet — retry in background.
-        Logger.Warning("[Subframes] Sequence event subscription deferred — SequenceMediator internals not yet initialized.");
+        // SequenceMediator exists but internals aren't ready yet - retry in background.
+        Logger.Warning("[Subframes] Sequence event subscription deferred - SequenceMediator internals not yet initialized.");
         var cts = new CancellationTokenSource();
         _sequenceRetrySubscribeCts = cts;
         _ = RetrySubscribeSequenceEventsAsync(cts.Token);
@@ -232,7 +232,7 @@ public class SubframesPlugin : PluginBase, IPluginManifest, IPartImportsSatisfie
             }
             else
             {
-                Logger.Info("[Subframes] ISequenceMediator.SequenceStarted not present in this NINA build — session will open on first captured image instead.");
+                Logger.Info("[Subframes] ISequenceMediator.SequenceStarted not present in this NINA build - session will open on first captured image instead.");
             }
 
             _sequenceEventsSubscribed = true;
@@ -273,7 +273,7 @@ public class SubframesPlugin : PluginBase, IPluginManifest, IPartImportsSatisfie
             }
         }
 
-        Logger.Warning("[Subframes] Gave up subscribing to sequence events after 60s — sessions will not auto-open/close on sequence start/end.");
+        Logger.Warning("[Subframes] Gave up subscribing to sequence events after 60s - sessions will not auto-open/close on sequence start/end.");
     }
 
     /// <summary>
@@ -321,7 +321,7 @@ public class SubframesPlugin : PluginBase, IPluginManifest, IPartImportsSatisfie
         _options.SelectedTsProfileId = profileId;
         _options.Save();
 
-        // Re-fetch preview and send heartbeats asynchronously — fire-and-forget.
+        // Re-fetch preview and send heartbeats asynchronously - fire-and-forget.
         _ = Task.Run(async () =>
         {
             await FetchAndUpdateTsPreviewAsync(CancellationToken.None).ConfigureAwait(false);
@@ -377,7 +377,7 @@ public class SubframesPlugin : PluginBase, IPluginManifest, IPartImportsSatisfie
     /// <summary>
     /// Called by NINA when the advanced sequence starts.  Opens an auto-session
     /// immediately so the dashboard reflects the imaging run from the moment
-    /// the user hits "Start" — not after the first exposure completes.
+    /// the user hits "Start" - not after the first exposure completes.
     /// </summary>
     private Task OnSequenceStarted(object sender, EventArgs e)
     {
@@ -412,7 +412,7 @@ public class SubframesPlugin : PluginBase, IPluginManifest, IPartImportsSatisfie
             Logger.Debug($"[Subframes] Could not read targets from sequence: {ex.Message}");
         }
 
-        // Bug 2: RA=0/Dec=0 is the vernal equinox — not a real DSO target.
+        // Bug 2: RA=0/Dec=0 is the vernal equinox - not a real DSO target.
         // Treat it as "no target known yet" so the session opens without a bogus location.
         if (targetRa == 0 && targetDec == 0)
             targetName = null;
@@ -434,7 +434,7 @@ public class SubframesPlugin : PluginBase, IPluginManifest, IPartImportsSatisfie
     }
 
     /// <summary>
-    /// Called by NINA when the advanced sequence finishes — whether it completed
+    /// Called by NINA when the advanced sequence finishes - whether it completed
     /// normally, was cancelled by the user, or failed.  Closes any open session
     /// so the website reflects the actual end of the imaging run.
     /// </summary>
@@ -443,7 +443,7 @@ public class SubframesPlugin : PluginBase, IPluginManifest, IPartImportsSatisfie
         UnsubscribeFromContainerEvents();
         if (_sessionService.HasActiveSession)
         {
-            Logger.Info("[Subframes] Sequence run ended — closing active session.");
+            Logger.Info("[Subframes] Sequence run ended - closing active session.");
             // Preserve the cached preview for the Tonight's Plan post-dawn heartbeat.
             if (_tsPreviewState == TsPreviewState.Active || _tsPreviewState == TsPreviewState.Startup)
             {
@@ -457,57 +457,39 @@ public class SubframesPlugin : PluginBase, IPluginManifest, IPartImportsSatisfie
 
     /// <summary>
     /// Called when SessionService successfully starts a new session.
-    /// Fires an immediate station heartbeat so the website reflects equipment data
-    /// and imaging status right away — without waiting for the 5-minute timer.
+    /// Fetches the TS preview immediately so the first heartbeat already includes
+    /// tonight's schedule - no warmup delay. If the fetch fails or returns empty,
+    /// the 60-second preview loop retries automatically and fires another immediate
+    /// station heartbeat once preview data arrives.
     /// </summary>
     private void OnSessionStarted(object? sender, EventArgs e)
     {
-        try
+        _sessionEverStarted = true;
+
+        // Fire-and-forget: fetch preview first, then send the station heartbeat so
+        // the website receives equipment data *and* preview data in the same beat.
+        _ = Task.Run(async () =>
         {
-            _sessionEverStarted = true;
-
-            // IDLE / Idle_CachedPreview → STARTUP: start 5-minute warmup before
-            // the first preview fetch so we don’t hammer the TS API at sequence start.
-            if (_tsPreviewState == TsPreviewState.Idle || _tsPreviewState == TsPreviewState.Idle_CachedPreview)
+            try
             {
-                _tsPreviewState = TsPreviewState.Startup;
-                _tsPreviewStartupTime = DateTime.UtcNow;
-                Logger.Debug("[Subframes] TS preview state: → STARTUP (5-min warmup before first fetch).");
-
-                var cts = _stationHeartbeatCts;
-                if (cts is not null)
-                {
-                    _ = Task.Run(async () =>
-                    {
-                        try
-                        {
-                            await Task.Delay(TimeSpan.FromMinutes(5), cts.Token).ConfigureAwait(false);
-                            // STARTUP → ACTIVE: warmup complete.
-                            if (_tsPreviewState == TsPreviewState.Startup)
-                            {
-                                _tsPreviewState = TsPreviewState.Active;
-                                _tsLastPreviewFetch = default;
-                                var warmupElapsed = (DateTime.UtcNow - _tsPreviewStartupTime).TotalSeconds;
-                                Logger.Debug($"[Subframes] TS preview state: STARTUP → ACTIVE after {warmupElapsed:F0}s warmup, fetching first preview.");
-                                await FetchAndUpdateTsPreviewAsync(cts.Token).ConfigureAwait(false);
-                            }
-                        }
-                        catch (OperationCanceledException) { /* Normal shutdown */ }
-                        catch (Exception ex)
-                        {
-                            Logger.Warning($"[Subframes] TS preview startup task failed: {ex.Message}");
-                        }
-                    });
-                }
+                await FetchAndUpdateTsPreviewAsync(CancellationToken.None).ConfigureAwait(false);
+                Logger.Debug("[Subframes] OnSessionStarted: immediate TS preview fetch complete.");
+            }
+            catch (Exception ex)
+            {
+                Logger.Warning($"[Subframes] OnSessionStarted: TS preview fetch failed: {ex.Message}");
             }
 
-            _ = _apiClient.SendStationHeartbeatAsync(BuildStationHeartbeatRequest(), CancellationToken.None);
-            Logger.Debug("[Subframes] Immediate station heartbeat triggered on session start.");
-        }
-        catch (Exception ex)
-        {
-            Logger.Warning($"[Subframes] OnSessionStarted: station heartbeat failed: {ex.Message}");
-        }
+            try
+            {
+                await _apiClient.SendStationHeartbeatAsync(BuildStationHeartbeatRequest(), CancellationToken.None);
+                Logger.Debug("[Subframes] Immediate station heartbeat triggered on session start.");
+            }
+            catch (Exception ex)
+            {
+                Logger.Warning($"[Subframes] OnSessionStarted: station heartbeat failed: {ex.Message}");
+            }
+        });
     }
 
     /// <summary>
@@ -529,7 +511,7 @@ public class SubframesPlugin : PluginBase, IPluginManifest, IPartImportsSatisfie
                 if (t is null) continue;
                 var type = t.GetType();
 
-                // Status lives on ISequenceEntity — use reflection to avoid DLR
+                // Status lives on ISequenceEntity - use reflection to avoid DLR
                 // cross-assembly binding failures that silently swallow the property.
                 var statusStr = type.GetProperty("Status")?.GetValue(t)?.ToString();
                 if (!string.Equals(statusStr, "RUNNING", StringComparison.OrdinalIgnoreCase))
@@ -559,7 +541,7 @@ public class SubframesPlugin : PluginBase, IPluginManifest, IPartImportsSatisfie
     /// <summary>
     /// Returns the flat list of all sequence items currently tracked by the advanced sequencer,
     /// via reflection on <c>GetAdvancedSequencerCurrentRunningItems</c>.  Returns null when the
-    /// mediator is unavailable or the method does not exist on this NINA build — the caller
+    /// mediator is unavailable or the method does not exist on this NINA build - the caller
     /// treats null as "not tracked" and leaves <see cref="SessionService.SequenceItemsProvider"/>
     /// producing null, which keeps yield counters untracked at session end.
     /// </summary>
@@ -636,7 +618,7 @@ public class SubframesPlugin : PluginBase, IPluginManifest, IPartImportsSatisfie
     /// <summary>
     /// Subscribes to PropertyChanged on all DSO containers in the current sequence so that
     /// when a container transitions to RUNNING we can immediately update the current target
-    /// — without waiting for the first image to be saved.
+    /// - without waiting for the first image to be saved.
     /// </summary>
     private void SubscribeToDsoContainerEvents()
     {
@@ -669,7 +651,7 @@ public class SubframesPlugin : PluginBase, IPluginManifest, IPartImportsSatisfie
         foreach (var (container, handler) in _containerSubscriptions)
         {
             try { container.PropertyChanged -= handler; }
-            catch { /* ignore — container may already be GC'd */ }
+            catch { /* ignore - container may already be GC'd */ }
         }
         _containerSubscriptions.Clear();
     }
@@ -744,7 +726,7 @@ public class SubframesPlugin : PluginBase, IPluginManifest, IPartImportsSatisfie
         _stationHeartbeatTask = null;
         _tsPreviewFloorTimerTask = null;
         _tsPreviewState = TsPreviewState.Idle;
-        // Do NOT null _currentTsPreview here — the cached preview is needed for
+        // Do NOT null _currentTsPreview here - the cached preview is needed for
         // the Tonight's Plan post-dawn heartbeat even after imaging ends.
         _tsProfiles = Array.Empty<TsProfileInfo>();
         _tsDetector?.Stop();
@@ -796,7 +778,7 @@ public class SubframesPlugin : PluginBase, IPluginManifest, IPartImportsSatisfie
         // (observed ~600 ms) with generous margin for slower machines.
         if (_tsDetector?.CurrentState == "none")
         {
-            Logger.Info("[Subframes] TS not detected at startup — deferring first heartbeat to allow plugin load to complete.");
+            Logger.Info("[Subframes] TS not detected at startup - deferring first heartbeat to allow plugin load to complete.");
             try
             {
                 await Task.Delay(TimeSpan.FromSeconds(5), ct).ConfigureAwait(false);
@@ -815,14 +797,14 @@ public class SubframesPlugin : PluginBase, IPluginManifest, IPartImportsSatisfie
         }
 
         // Wait for the preview loop to complete its first fetch (up to 10 s) so the
-        // first heartbeat includes TS preview data.  Times out gracefully — the
+        // first heartbeat includes TS preview data.  Times out gracefully - the
         // heartbeat fires regardless so no data is permanently lost.
         //
         // NOTE: With the event-driven state machine the preview is no longer fetched
         // eagerly at startup (only after session start + 5-min warmup), so we skip
         // this wait entirely.
 
-        // First heartbeat — TS state should now be accurate.
+        // First heartbeat - TS state should now be accurate.
         Interlocked.Exchange(ref _lastStationHeartbeatSentTicks, DateTime.UtcNow.Ticks);
         _ = _apiClient.SendStationHeartbeatAsync(BuildStationHeartbeatRequest(), CancellationToken.None);
 
@@ -837,7 +819,7 @@ public class SubframesPlugin : PluginBase, IPluginManifest, IPartImportsSatisfie
         }
         catch (OperationCanceledException)
         {
-            // Normal shutdown — plugin unloaded.
+            // Normal shutdown - plugin unloaded.
         }
         catch (Exception ex)
         {
@@ -1001,7 +983,7 @@ public class SubframesPlugin : PluginBase, IPluginManifest, IPartImportsSatisfie
     /// <summary>
     /// Called via <see cref="SessionService.TsPreviewCallback"/> after each image save.
     /// Only fetches the TS preview if the state machine is in <c>Active</c> state and at
-    /// least 30 seconds have elapsed since the last fetch (ceiling guard — prevents
+    /// least 30 seconds have elapsed since the last fetch (ceiling guard - prevents
     /// burst-fire during rapid exposures).
     /// </summary>
     private void OnImageSavedTsPreviewCheck()
@@ -1066,7 +1048,7 @@ public class SubframesPlugin : PluginBase, IPluginManifest, IPartImportsSatisfie
     {
         if (_tsDetector?.CurrentState != "active" || _tsPreviewClient is null)
         {
-            // When TS is not active, preserve the cached preview value — do not null it.
+            // When TS is not active, preserve the cached preview value - do not null it.
             // This keeps heartbeats carrying the last-known preview (e.g. post-dawn, Idle_CachedPreview state).
             return;
         }
@@ -1076,7 +1058,7 @@ public class SubframesPlugin : PluginBase, IPluginManifest, IPartImportsSatisfie
             var profiles = await _tsPreviewClient.FetchProfilesAsync(ct).ConfigureAwait(false);
             if (profiles.Count == 0)
             {
-                // No profiles available — preserve the cached preview (do not null it).
+                // No profiles available - preserve the cached preview (do not null it).
                 return;
             }
 
@@ -1108,7 +1090,7 @@ public class SubframesPlugin : PluginBase, IPluginManifest, IPartImportsSatisfie
             var newBlockCount = _currentTsPreview?.Blocks?.Count ?? 0;
             if (newBlockCount != previousBlockCount && newBlockCount > 0)
             {
-                // Preview changed — push an immediate heartbeat so the dashboard
+                // Preview changed - push an immediate heartbeat so the dashboard
                 // reflects the update within ~60 s instead of waiting up to 300 s.
                 _ = _apiClient.SendStationHeartbeatAsync(BuildStationHeartbeatRequest(), CancellationToken.None);
             }
