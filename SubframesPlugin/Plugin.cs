@@ -70,6 +70,11 @@ public class SubframesPlugin : PluginBase, IPluginManifest, IPartImportsSatisfie
     // True until the first station heartbeat is sent after init or restart.
     // Controls whether we send a full TS progress snapshot or an incremental delta.
     private bool _tsFirstBeat = true;
+    // Handler stored so it can be unsubscribed from _tsDetector.StateChanged on stop.
+    private EventHandler<string>? _tsStateChangedHandler;
+    // UTC ticks of the most recent station heartbeat send; used to debounce rapid
+    // event-driven sends (e.g. TS state flapping or collision with the periodic timer).
+    private long _lastStationHeartbeatSentTicks;
     // Set to true when the first Start Session command executes.
     // TS preview queries and planner data are suppressed until then.
     private volatile bool _sessionEverStarted;
@@ -657,6 +662,11 @@ public class SubframesPlugin : PluginBase, IPluginManifest, IPartImportsSatisfie
         _tsFirstBeat = true;
         TsProgressReader.ResetCache();
         _tsDetector?.Start();
+        // Subscribe to TS state changes so we can fire an immediate heartbeat when
+        // the detector transitions (e.g. no_api → active after DoProbeAsync completes).
+        _tsStateChangedHandler = OnTsStateChanged;
+        if (_tsDetector is not null)
+            _tsDetector.StateChanged += _tsStateChangedHandler;
         _tsPreviewClient = new TsPreviewClient(_options.TsApiPort);
         var cts = new CancellationTokenSource();
         _stationHeartbeatCts = cts;
@@ -667,6 +677,11 @@ public class SubframesPlugin : PluginBase, IPluginManifest, IPartImportsSatisfie
 
     private void StopStationHeartbeat()
     {
+        // Unsubscribe state-change handler before stopping/replacing the detector.
+        if (_tsDetector is not null && _tsStateChangedHandler is not null)
+            _tsDetector.StateChanged -= _tsStateChangedHandler;
+        _tsStateChangedHandler = null;
+
         _stationHeartbeatCts?.Cancel();
         _stationHeartbeatCts?.Dispose();
         _stationHeartbeatCts = null;
@@ -677,6 +692,43 @@ public class SubframesPlugin : PluginBase, IPluginManifest, IPartImportsSatisfie
         _currentTsPreview = null;
         _tsProfiles = Array.Empty<TsProfileInfo>();
         _tsDetector?.Stop();
+    }
+
+    /// <summary>
+    /// Fired by <see cref="TargetSchedulerDetector"/> when the TS availability state transitions
+    /// (e.g. <c>no_api → active</c> after <c>DoProbeAsync</c> completes at startup).
+    /// Sends an immediate out-of-cycle station heartbeat so the server always receives the
+    /// correct <c>tsAvailabilityState</c> within milliseconds of detection.
+    /// </summary>
+    /// <remarks>
+    /// Debouncing: if a heartbeat was sent within the last 2 seconds (e.g. by the periodic
+    /// timer or a rapid back-to-back state oscillation), this send is suppressed.  The
+    /// timestamp is updated atomically with <see cref="Interlocked.Exchange(ref long, long)"/>.
+    /// </remarks>
+    private void OnTsStateChanged(object? sender, string newState)
+    {
+        try
+        {
+            if (!_isPrimary || !_options.IsEnabled) return;
+
+            // Debounce: skip if a heartbeat was sent very recently to avoid a burst
+            // from rapid state flapping or an exact collision with the periodic timer.
+            var nowTicks = DateTime.UtcNow.Ticks;
+            var prevTicks = Interlocked.Read(ref _lastStationHeartbeatSentTicks);
+            if (nowTicks - prevTicks < TimeSpan.TicksPerSecond * 2)
+            {
+                Logger.Debug($"[Subframes] TS state → {newState}: immediate heartbeat suppressed (< 2 s since last send).");
+                return;
+            }
+
+            Interlocked.Exchange(ref _lastStationHeartbeatSentTicks, nowTicks);
+            Logger.Info($"[Subframes] TS state → {newState}: firing immediate station heartbeat.");
+            _ = _apiClient.SendStationHeartbeatAsync(BuildStationHeartbeatRequest(), CancellationToken.None);
+        }
+        catch (Exception ex)
+        {
+            Logger.Warning($"[Subframes] OnTsStateChanged: immediate station heartbeat failed: {ex.Message}");
+        }
     }
 
     private async Task RunStationHeartbeatLoopAsync(CancellationToken ct)
@@ -719,13 +771,17 @@ public class SubframesPlugin : PluginBase, IPluginManifest, IPartImportsSatisfie
         }
 
         // First heartbeat — TS state should now be accurate.
+        Interlocked.Exchange(ref _lastStationHeartbeatSentTicks, DateTime.UtcNow.Ticks);
         _ = _apiClient.SendStationHeartbeatAsync(BuildStationHeartbeatRequest(), CancellationToken.None);
 
         using var timer = new PeriodicTimer(TimeSpan.FromSeconds(300));
         try
         {
             while (await timer.WaitForNextTickAsync(ct))
+            {
+                Interlocked.Exchange(ref _lastStationHeartbeatSentTicks, DateTime.UtcNow.Ticks);
                 _ = _apiClient.SendStationHeartbeatAsync(BuildStationHeartbeatRequest(), CancellationToken.None);
+            }
         }
         catch (OperationCanceledException)
         {
