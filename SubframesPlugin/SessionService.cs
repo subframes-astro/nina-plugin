@@ -270,6 +270,17 @@ public sealed class SessionService : IDisposable, IFocuserConsumer, IGuiderConsu
     /// </summary>
     public event EventHandler? SessionStarted;
 
+    // Callback invoked after each image save so the TS preview state machine can decide
+    // whether to fetch a fresh preview based on imaging activity.  Set by Plugin.cs.
+    private Action? _tsPreviewCallback;
+
+    /// <summary>
+    /// Set by Plugin.cs to wire in <c>Plugin.OnImageSavedTsPreviewCheck</c>.
+    /// Invoked (fire-and-forget) after each successful <see cref="PostFrameAsync"/> dispatch
+    /// so the TS preview state machine can throttle fetches to per-image cadence.
+    /// </summary>
+    internal Action? TsPreviewCallback { set => _tsPreviewCallback = value; }
+
     /// <summary>The server-assigned session ID, or null if no session is active.</summary>
     public string? ActiveSessionId => _activeSessionId;
 
@@ -746,6 +757,10 @@ public sealed class SessionService : IDisposable, IFocuserConsumer, IGuiderConsu
 
         // Fire-and-forget, but capture exceptions so nothing leaks to NINA.
         _ = PostFrameAsync(sessionId, e);
+
+        // Notify the TS preview state machine that an image was saved.
+        // The callback decides (based on state and timing) whether to fetch a new preview.
+        _tsPreviewCallback?.Invoke();
     }
 
     private Task PostFrameAsync(string sessionId, ImageSavedEventArgs e)

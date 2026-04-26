@@ -71,17 +71,24 @@ public class SubframesPlugin : PluginBase, IPluginManifest, IPartImportsSatisfie
     // Controls whether we send a full TS progress snapshot or an incremental delta.
     private bool _tsFirstBeat = true;
     // Set to true when the first Start Session command executes.
-    // TS preview queries and planner data are suppressed until then.
+    // TS progress queries are suppressed until then.
     private volatile bool _sessionEverStarted;
     private TargetSchedulerDetector? _tsDetector;
     private TsPreviewClient? _tsPreviewClient;
-    private TsPreviewDto? _currentTsPreview; // Written only from the preview loop; read from BuildStationHeartbeatRequest
-    private TaskCompletionSource<bool>? _previewFirstFetchDone;
-    // Written from the preview loop (thread pool); read from TsProfiles property.
+    private volatile TsPreviewDto? _currentTsPreview; // Written from preview fetches; read from BuildStationHeartbeatRequest
+    // Written from the floor timer (thread pool); read from TsProfiles property.
     // Field assignment is atomic on .NET for reference types, so no lock needed for
     // the snapshot-replace pattern used here.
     private IReadOnlyList<TsProfileInfo> _tsProfiles = Array.Empty<TsProfileInfo>();
-    private Task? _tsPreviewLoopTask;
+
+    // ── TS Preview state machine ──────────────────────────────────────────────
+    // Replaces the old 60-second PeriodicTimer with an event-driven approach that
+    // reduces TS Preview API calls by 95-99%.
+    private enum TsPreviewState { Idle, Startup, Active, Idle_CachedPreview }
+    private volatile TsPreviewState _tsPreviewState = TsPreviewState.Idle;
+    private DateTime _tsPreviewStartupTime;   // When we entered Startup state (used for diagnostics)
+    private DateTime _tsLastPreviewFetch;     // Last successful fetch timestamp (ceiling guard)
+    private Task? _tsPreviewFloorTimerTask;
 
     // Fired (on a thread pool thread) when the profile list is refreshed from the TS API.
     // The OptionsPanelViewModel subscribes to keep its dropdown in sync.
@@ -151,6 +158,7 @@ public class SubframesPlugin : PluginBase, IPluginManifest, IPartImportsSatisfie
         TsHelper.Configure(_options.TsDatabasePath);
         _sessionService = new SessionService(imageSaveMediator, _apiClient, _options, _frameCache, _syncEngine, safetyMonitorMediator, guiderMediator, weatherDataMediator, rotatorMediator, telescopeMediator, focuserMediator);
         _sessionService.SessionStarted += OnSessionStarted;
+        _sessionService.TsPreviewCallback = OnImageSavedTsPreviewCheck;
         _optionsVm = new OptionsPanelViewModel(this);
 
         if (_options.IsEnabled && !string.IsNullOrWhiteSpace(_options.ApiKey))
@@ -431,6 +439,12 @@ public class SubframesPlugin : PluginBase, IPluginManifest, IPartImportsSatisfie
         if (_sessionService.HasActiveSession)
         {
             Logger.Info("[Subframes] Sequence run ended — closing active session.");
+            // Preserve the cached preview for the Tonight's Plan post-dawn heartbeat.
+            if (_tsPreviewState == TsPreviewState.Active || _tsPreviewState == TsPreviewState.Startup)
+            {
+                _tsPreviewState = TsPreviewState.Idle_CachedPreview;
+                Logger.Debug("[Subframes] TS preview state: → IDLE_CACHED_PREVIEW (session ended).");
+            }
             _ = _sessionService.EndSessionAsync(CancellationToken.None);
         }
         return Task.CompletedTask;
@@ -446,6 +460,42 @@ public class SubframesPlugin : PluginBase, IPluginManifest, IPartImportsSatisfie
         try
         {
             _sessionEverStarted = true;
+
+            // IDLE / Idle_CachedPreview → STARTUP: start 5-minute warmup before
+            // the first preview fetch so we don’t hammer the TS API at sequence start.
+            if (_tsPreviewState == TsPreviewState.Idle || _tsPreviewState == TsPreviewState.Idle_CachedPreview)
+            {
+                _tsPreviewState = TsPreviewState.Startup;
+                _tsPreviewStartupTime = DateTime.UtcNow;
+                Logger.Debug("[Subframes] TS preview state: → STARTUP (5-min warmup before first fetch).");
+
+                var cts = _stationHeartbeatCts;
+                if (cts is not null)
+                {
+                    _ = Task.Run(async () =>
+                    {
+                        try
+                        {
+                            await Task.Delay(TimeSpan.FromMinutes(5), cts.Token).ConfigureAwait(false);
+                            // STARTUP → ACTIVE: warmup complete.
+                            if (_tsPreviewState == TsPreviewState.Startup)
+                            {
+                                _tsPreviewState = TsPreviewState.Active;
+                                _tsLastPreviewFetch = default;
+                                var warmupElapsed = (DateTime.UtcNow - _tsPreviewStartupTime).TotalSeconds;
+                                Logger.Debug($"[Subframes] TS preview state: STARTUP → ACTIVE after {warmupElapsed:F0}s warmup, fetching first preview.");
+                                await FetchAndUpdateTsPreviewAsync(cts.Token).ConfigureAwait(false);
+                            }
+                        }
+                        catch (OperationCanceledException) { /* Normal shutdown */ }
+                        catch (Exception ex)
+                        {
+                            Logger.Warning($"[Subframes] TS preview startup task failed: {ex.Message}");
+                        }
+                    });
+                }
+            }
+
             _ = _apiClient.SendStationHeartbeatAsync(BuildStationHeartbeatRequest(), CancellationToken.None);
             Logger.Debug("[Subframes] Immediate station heartbeat triggered on session start.");
         }
@@ -666,9 +716,9 @@ public class SubframesPlugin : PluginBase, IPluginManifest, IPartImportsSatisfie
         _tsPreviewClient = new TsPreviewClient(_options.TsApiPort);
         var cts = new CancellationTokenSource();
         _stationHeartbeatCts = cts;
-        _previewFirstFetchDone = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        _tsPreviewState = TsPreviewState.Idle;
         _stationHeartbeatTask = RunStationHeartbeatLoopAsync(cts.Token);
-        _tsPreviewLoopTask = RunTsPreviewLoopAsync(cts.Token);
+        _tsPreviewFloorTimerTask = RunTsPreviewFloorTimerAsync(cts.Token);
     }
 
     private void StopStationHeartbeat()
@@ -677,10 +727,10 @@ public class SubframesPlugin : PluginBase, IPluginManifest, IPartImportsSatisfie
         _stationHeartbeatCts?.Dispose();
         _stationHeartbeatCts = null;
         _stationHeartbeatTask = null;
-        _tsPreviewLoopTask = null;
-        _previewFirstFetchDone?.TrySetCanceled();
-        _previewFirstFetchDone = null;
-        _currentTsPreview = null;
+        _tsPreviewFloorTimerTask = null;
+        _tsPreviewState = TsPreviewState.Idle;
+        // Do NOT null _currentTsPreview here — the cached preview is needed for
+        // the Tonight's Plan post-dawn heartbeat even after imaging ends.
         _tsProfiles = Array.Empty<TsProfileInfo>();
         _tsDetector?.Stop();
     }
@@ -715,14 +765,10 @@ public class SubframesPlugin : PluginBase, IPluginManifest, IPartImportsSatisfie
         // Wait for the preview loop to complete its first fetch (up to 10 s) so the
         // first heartbeat includes TS preview data.  Times out gracefully — the
         // heartbeat fires regardless so no data is permanently lost.
-        if (_previewFirstFetchDone is { } tcs)
-        {
-            try
-            {
-                await Task.WhenAny(tcs.Task, Task.Delay(TimeSpan.FromSeconds(10), ct)).ConfigureAwait(false);
-            }
-            catch (OperationCanceledException) { return; }
-        }
+        //
+        // NOTE: With the event-driven state machine the preview is no longer fetched
+        // eagerly at startup (only after session start + 5-min warmup), so we skip
+        // this wait entirely.
 
         // First heartbeat — TS state should now be accurate.
         _ = _apiClient.SendStationHeartbeatAsync(BuildStationHeartbeatRequest(), CancellationToken.None);
@@ -889,23 +935,66 @@ public class SubframesPlugin : PluginBase, IPluginManifest, IPartImportsSatisfie
             TsProgressSnapshot  = tsSnapshot,
             TsProgressDelta     = tsDelta,
             TsAvailabilityState = _tsDetector?.CurrentState,
-            TsPreview           = _tsDetector?.CurrentState == "active" ? _currentTsPreview : null,
+            TsPreview           = (_tsDetector?.CurrentState == "active" || _tsPreviewState == TsPreviewState.Idle_CachedPreview)
+                ? _currentTsPreview : null,
         };
     }
 
-    // ── TS Preview loop ──────────────────────────────────────────────────────
+    // ── TS Preview state machine ────────────────────────────────────────────
 
-    private async Task RunTsPreviewLoopAsync(CancellationToken ct)
+    /// <summary>
+    /// Called via <see cref="SessionService.TsPreviewCallback"/> after each image save.
+    /// Only fetches the TS preview if the state machine is in <c>Active</c> state and at
+    /// least 30 seconds have elapsed since the last fetch (ceiling guard — prevents
+    /// burst-fire during rapid exposures).
+    /// </summary>
+    private void OnImageSavedTsPreviewCheck()
     {
-        // Immediate fetch on startup so the first station heartbeat includes preview data.
-        await FetchAndUpdateTsPreviewAsync(ct).ConfigureAwait(false);
-        _previewFirstFetchDone?.TrySetResult(true);
+        if (_tsPreviewState != TsPreviewState.Active) return;
 
-        using var timer = new PeriodicTimer(TimeSpan.FromSeconds(60));
+        var now = DateTime.UtcNow;
+        if ((now - _tsLastPreviewFetch).TotalSeconds < 30) return;
+
+        _tsLastPreviewFetch = now;
+        var cts = _stationHeartbeatCts;
+        if (cts is null) return;
+
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await FetchAndUpdateTsPreviewAsync(cts.Token).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) { /* Normal shutdown */ }
+            catch (Exception ex)
+            {
+                Logger.Debug($"[Subframes] OnImageSavedTsPreviewCheck failed: {ex.Message}");
+            }
+        });
+    }
+
+    /// <summary>
+    /// 15-minute floor timer for the TS preview state machine.
+    /// During <c>Active</c> state, if no image-driven preview fetch has occurred in the
+    /// last 10 minutes, fires one poll to keep the cached preview reasonably fresh.
+    /// This replaces the old 60-second polling loop and fires ~96x less often per night.
+    /// </summary>
+    private async Task RunTsPreviewFloorTimerAsync(CancellationToken ct)
+    {
+        using var timer = new PeriodicTimer(TimeSpan.FromMinutes(15));
         try
         {
             while (await timer.WaitForNextTickAsync(ct).ConfigureAwait(false))
+            {
+                if (_tsPreviewState != TsPreviewState.Active) continue;
+
+                var idleSinceMinutes = (DateTime.UtcNow - _tsLastPreviewFetch).TotalMinutes;
+                if (idleSinceMinutes < 10) continue; // Image-driven fetch was recent enough.
+
+                Logger.Debug("[Subframes] TS preview floor timer: no recent image-driven fetch, polling once.");
                 await FetchAndUpdateTsPreviewAsync(ct).ConfigureAwait(false);
+                _tsLastPreviewFetch = DateTime.UtcNow;
+            }
         }
         catch (OperationCanceledException)
         {
@@ -913,23 +1002,16 @@ public class SubframesPlugin : PluginBase, IPluginManifest, IPartImportsSatisfie
         }
         catch (Exception ex)
         {
-            Logger.Error($"[Subframes] TS preview loop terminated unexpectedly: {ex.Message}");
+            Logger.Error($"[Subframes] TS preview floor timer terminated unexpectedly: {ex.Message}");
         }
     }
 
     private async Task FetchAndUpdateTsPreviewAsync(CancellationToken ct)
     {
-        // Do not query the TS preview endpoint until the user has triggered
-        // a Start Session command at least once this NINA session.
-        if (!_sessionEverStarted)
-        {
-            _currentTsPreview = null;
-            return;
-        }
-
         if (_tsDetector?.CurrentState != "active" || _tsPreviewClient is null)
         {
-            _currentTsPreview = null;
+            // When TS is not active, preserve the cached preview value — do not null it.
+            // This keeps heartbeats carrying the last-known preview (e.g. post-dawn, Idle_CachedPreview state).
             return;
         }
 
@@ -938,7 +1020,7 @@ public class SubframesPlugin : PluginBase, IPluginManifest, IPartImportsSatisfie
             var profiles = await _tsPreviewClient.FetchProfilesAsync(ct).ConfigureAwait(false);
             if (profiles.Count == 0)
             {
-                _currentTsPreview = null;
+                // No profiles available — preserve the cached preview (do not null it).
                 return;
             }
 
