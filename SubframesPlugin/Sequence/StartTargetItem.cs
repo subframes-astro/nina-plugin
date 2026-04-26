@@ -112,11 +112,7 @@ public partial class StartTargetItem : SequenceItem, IValidatable
     public bool Validate()
     {
         Issues.Clear();
-
-        if (!_sessionService.HasActiveSession)
-            Issues.Add("No active Subframes session — add 'Start Subframes Session' earlier in the sequence.");
-
         RaisePropertyChanged(nameof(Issues));
-        return !Issues.Any(i => i.StartsWith("Error", StringComparison.OrdinalIgnoreCase));
+        return true;
     }
 }
