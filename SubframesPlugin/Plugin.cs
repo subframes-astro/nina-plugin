@@ -85,8 +85,8 @@ public class SubframesPlugin : PluginBase, IPluginManifest, IPartImportsSatisfie
     // Replaces the old 60-second PeriodicTimer with an event-driven approach that
     // reduces TS Preview API calls by 95-99%.
     private enum TsPreviewState { Idle, Startup, Active, Idle_CachedPreview }
-    private TsPreviewState _tsPreviewState = TsPreviewState.Idle;
-    private DateTime _tsPreviewStartupTime;   // When we entered Startup state
+    private volatile TsPreviewState _tsPreviewState = TsPreviewState.Idle;
+    private DateTime _tsPreviewStartupTime;   // When we entered Startup state (used for diagnostics)
     private DateTime _tsLastPreviewFetch;     // Last successful fetch timestamp (ceiling guard)
     private Task? _tsPreviewFloorTimerTask;
 
@@ -482,7 +482,8 @@ public class SubframesPlugin : PluginBase, IPluginManifest, IPartImportsSatisfie
                             {
                                 _tsPreviewState = TsPreviewState.Active;
                                 _tsLastPreviewFetch = default;
-                                Logger.Debug("[Subframes] TS preview state: STARTUP → ACTIVE, fetching first preview.");
+                                var warmupElapsed = (DateTime.UtcNow - _tsPreviewStartupTime).TotalSeconds;
+                                Logger.Debug($"[Subframes] TS preview state: STARTUP → ACTIVE after {warmupElapsed:F0}s warmup, fetching first preview.");
                                 await FetchAndUpdateTsPreviewAsync(cts.Token).ConfigureAwait(false);
                             }
                         }
