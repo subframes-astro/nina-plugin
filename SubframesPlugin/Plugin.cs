@@ -457,23 +457,41 @@ public class SubframesPlugin : PluginBase, IPluginManifest, IPartImportsSatisfie
 
     /// <summary>
     /// Called when SessionService successfully starts a new session.
-    /// Fetches the TS preview immediately so the first heartbeat already includes
-    /// tonight's schedule - no warmup delay. If the fetch fails or returns empty,
-    /// the 60-second preview loop retries automatically and fires another immediate
-    /// station heartbeat once preview data arrives.
+    /// Transitions the TS preview state machine to Active, fetches the preview with
+    /// a stabilization check (re-fetch after a short delay to confirm the TS API has
+    /// finished computing all targets), then sends the station heartbeat.
     /// </summary>
     private void OnSessionStarted(object? sender, EventArgs e)
     {
         _sessionEverStarted = true;
+        _tsPreviewState = TsPreviewState.Active;
+        _tsPreviewStartupTime = DateTime.UtcNow;
+        _tsLastPreviewFetch = DateTime.UtcNow;
+        Logger.Info("[Subframes] TS preview state: -> ACTIVE (session started).");
 
-        // Fire-and-forget: fetch preview first, then send the station heartbeat so
-        // the website receives equipment data *and* preview data in the same beat.
+        // Fire-and-forget: fetch preview with stabilization, then send heartbeat.
         _ = Task.Run(async () =>
         {
             try
             {
                 await FetchAndUpdateTsPreviewAsync(CancellationToken.None).ConfigureAwait(false);
-                Logger.Debug("[Subframes] OnSessionStarted: immediate TS preview fetch complete.");
+                var firstCount = _currentTsPreview?.Blocks?.Count ?? 0;
+                Logger.Debug($"[Subframes] OnSessionStarted: initial TS preview fetch complete ({firstCount} blocks).");
+
+                // Stabilization: wait briefly and re-fetch to confirm the TS API
+                // has finished computing all targets. If the block count increases,
+                // repeat once more. Max 3 attempts to avoid delaying indefinitely.
+                for (int attempt = 0; attempt < 2; attempt++)
+                {
+                    await Task.Delay(TimeSpan.FromSeconds(3), CancellationToken.None).ConfigureAwait(false);
+                    var prevCount = _currentTsPreview?.Blocks?.Count ?? 0;
+                    await FetchAndUpdateTsPreviewAsync(CancellationToken.None).ConfigureAwait(false);
+                    var newCount = _currentTsPreview?.Blocks?.Count ?? 0;
+                    Logger.Debug($"[Subframes] OnSessionStarted: stabilization check {attempt + 1} ({prevCount} -> {newCount} blocks).");
+                    if (newCount <= prevCount) break; // Stable — stop re-fetching.
+                }
+
+                _tsLastPreviewFetch = DateTime.UtcNow;
             }
             catch (Exception ex)
             {
@@ -482,6 +500,7 @@ public class SubframesPlugin : PluginBase, IPluginManifest, IPartImportsSatisfie
 
             try
             {
+                Interlocked.Exchange(ref _lastStationHeartbeatSentTicks, DateTime.UtcNow.Ticks);
                 await _apiClient.SendStationHeartbeatAsync(BuildStationHeartbeatRequest(), CancellationToken.None);
                 Logger.Debug("[Subframes] Immediate station heartbeat triggered on session start.");
             }
