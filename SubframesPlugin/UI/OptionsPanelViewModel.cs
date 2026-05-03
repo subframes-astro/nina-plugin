@@ -66,6 +66,10 @@ public partial class OptionsPanelViewModel : ObservableObject
     [ObservableProperty]
     private string? _selectedTsProfileId;
 
+    /// <summary>Replay engine progress text, e.g. "Syncing 2/5 sessions…" or empty when idle.</summary>
+    [ObservableProperty]
+    private string _replayStatusText = string.Empty;
+
     /// <summary>True when multiple TS profiles are available and the user should pick one.</summary>
     public bool ShowProfileSelector => TsProfiles.Count > 1;
 
@@ -294,6 +298,9 @@ public partial class OptionsPanelViewModel : ObservableObject
         StatusMessage = id is not null
             ? $"Active session: {id}"
             : "No active session.";
+
+        // Poll replay engine status (null-safe; ReplayEngine is null on secondary instances).
+        ReplayStatusText = _plugin.ReplayEngine?.ReplayStatus ?? string.Empty;
     }
 
     private static SolidColorBrush FrozenBrush(Color color)
