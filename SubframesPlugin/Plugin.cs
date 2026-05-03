@@ -3,6 +3,7 @@ using System.ComponentModel.Composition;
 using System.Reflection;
 using System.Threading.Tasks;
 using NINA.Core.Utility;
+using NINA.Core.Utility.Notification;
 using NINA.Equipment.Interfaces.Mediator;
 using NINA.Profile.Interfaces;
 using NINA.Sequencer.Interfaces.Mediator;
@@ -417,6 +418,26 @@ public class SubframesPlugin : PluginBase, IPluginManifest, IPartImportsSatisfie
         if (targetRa == 0 && targetDec == 0)
             targetName = null;
 
+        // Warn the user if the sequence doesn't contain a "Start Subframes Session" item.
+        // Suppressed when Target Scheduler is active (it manages sessions itself) or when
+        // a session is already open (StartSessionItem executed before sequence start).
+        try
+        {
+            bool tsActive = _tsDetector?.CurrentState == "active";
+            if (!tsActive && !_sessionService.HasActiveSession && !ContainsStartSessionItem(sender))
+            {
+                const string toast = "Subframes: no \"Start Subframes Session\" command found in this sequence. "
+                    + "Add it to Sequence Start for explicit session control.";
+                Logger.Warning("[Subframes] Sequence started without a \"Start Subframes Session\" instruction. "
+                    + "Add it to the Sequence Start area for explicit session control.");
+                Notification.ShowWarning(toast);
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.Debug($"[Subframes] StartSessionItem presence check failed: {ex.Message}");
+        }
+
         if (_sessionService.HasActiveSession)
         {
             // Session already active (e.g. manual StartSubframesSession ran first).
@@ -577,6 +598,34 @@ public class SubframesPlugin : PluginBase, IPluginManifest, IPartImportsSatisfie
             Logger.Debug($"[Subframes] GetSequenceCurrentItems failed: {ex.Message}");
             return null;
         }
+    }
+
+    /// <summary>
+    /// Recursively walks the sequence item tree rooted at <paramref name="container"/> via
+    /// reflection, looking for any item whose type name is <c>StartSessionItem</c>.
+    /// Returns <c>true</c> if at least one such item is found anywhere in the tree.
+    /// Defensive: any reflection failure is silently ignored.
+    /// </summary>
+    private static bool ContainsStartSessionItem(object? container)
+    {
+        if (container is null) return false;
+        if (container.GetType().Name == nameof(Sequence.StartSessionItem)) return true;
+
+        try
+        {
+            var itemsProp = container.GetType().GetProperty("Items");
+            if (itemsProp?.GetValue(container) is System.Collections.IEnumerable items)
+            {
+                foreach (var item in items)
+                {
+                    if (item is not null && ContainsStartSessionItem(item))
+                        return true;
+                }
+            }
+        }
+        catch { /* ignore reflection failures */ }
+
+        return false;
     }
 
     /// <summary>Read a nested string property via reflection: obj.prop1.prop2.</summary>

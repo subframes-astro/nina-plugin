@@ -13,7 +13,7 @@ namespace Subframes.NinaPlugin.Sequence;
 /// Use this to signal waiting or paused states to the Subframes platform.
 /// Drop it immediately before a NINA wait instruction (WaitForTime,
 /// WaitForAltitude, WaitForTwilight, CoolCamera, etc.) and set:
-///   - Status = "waiting"
+///   - SessionStatus = "waiting"
 ///   - WaitReason = e.g. "Waiting for astronomical twilight"
 ///
 /// When a new exposure is saved, the plugin automatically transitions the
@@ -42,9 +42,9 @@ public partial class SetSessionStatusItem : SequenceItem, IValidatable
 
     /// <summary>One of: waiting, active, paused.</summary>
     [ObservableProperty]
-    private string _status = "waiting";
+    private string _sessionStatus = "waiting";
 
-    /// <summary>Human-readable reason shown to the user. Only used when Status = "waiting".</summary>
+    /// <summary>Human-readable reason shown to the user. Only used when SessionStatus = "waiting".</summary>
     [ObservableProperty]
     private string _waitReason = string.Empty;
 
@@ -58,7 +58,7 @@ public partial class SetSessionStatusItem : SequenceItem, IValidatable
     private SetSessionStatusItem(SetSessionStatusItem other) : base(other)
     {
         _sessionService = other._sessionService;
-        _status         = other._status;
+        _sessionStatus  = other._sessionStatus;
         _waitReason     = other._waitReason;
     }
 
@@ -74,7 +74,7 @@ public partial class SetSessionStatusItem : SequenceItem, IValidatable
             return;
         }
 
-        var status = Status.Trim().ToLowerInvariant();
+        var status = SessionStatus.Trim().ToLowerInvariant();
         var waitReason = (status == "waiting" && !string.IsNullOrWhiteSpace(WaitReason))
             ? WaitReason.Trim()
             : null;
@@ -95,8 +95,8 @@ public partial class SetSessionStatusItem : SequenceItem, IValidatable
     public override object Clone() => new SetSessionStatusItem(this);
 
     public override string ToString() =>
-        $"[SubframesSetStatus] Status='{Status}'" +
-        (Status == "waiting" && !string.IsNullOrWhiteSpace(WaitReason) ? $" Reason='{WaitReason}'" : "");
+        $"[SubframesSetStatus] SessionStatus='{SessionStatus}'" +
+        (SessionStatus == "waiting" && !string.IsNullOrWhiteSpace(WaitReason) ? $" Reason='{WaitReason}'" : "");
 
     // ── IValidatable ─────────────────────────────────────────────────────────
 
@@ -107,7 +107,7 @@ public partial class SetSessionStatusItem : SequenceItem, IValidatable
         Issues.Clear();
 
         var validStatuses = new[] { "waiting", "active", "paused" };
-        if (!validStatuses.Contains(Status.Trim().ToLowerInvariant()))
+        if (!validStatuses.Contains(SessionStatus.Trim().ToLowerInvariant()))
             Issues.Add($"Status must be one of: {string.Join(", ", validStatuses)}");
 
         RaisePropertyChanged(nameof(Issues));
