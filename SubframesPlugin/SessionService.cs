@@ -317,7 +317,7 @@ public sealed class SessionService : IDisposable, IFocuserConsumer, IGuiderConsu
             {
                 DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull
             });
-        _cache.InsertSession(localId, idempotencyKey, startJson);
+        _frameCache.InsertSession(localId, idempotencyKey, startJson);
 
         // Try live API call with idempotency key for safe replay.
         var requestWithKey = request with { IdempotencyKey = idempotencyKey };
@@ -326,7 +326,7 @@ public sealed class SessionService : IDisposable, IFocuserConsumer, IGuiderConsu
         if (sessionId is not null)
         {
             // Session created on server — ack it and remap any pre-cached frames.
-            _cache.MarkSessionAcked(localId, sessionId);
+            _frameCache.MarkSessionAcked(localId, sessionId);
         }
         else
         {
@@ -404,7 +404,7 @@ public sealed class SessionService : IDisposable, IFocuserConsumer, IGuiderConsu
 
         // Record the end locally so CacheReplayEngine can send EndSession if the API call fails.
         if (localSessionId is not null)
-            _cache.MarkSessionEnded(localSessionId, DateTime.UtcNow.ToString("o"), skipped, failed);
+            _frameCache.MarkSessionEnded(localSessionId, DateTime.UtcNow.ToString("o"), skipped, failed);
 
         // Query TS for per-frame grading results and all-time progress before clearing state.
         var sessionEnd = DateTime.UtcNow;
@@ -434,7 +434,7 @@ public sealed class SessionService : IDisposable, IFocuserConsumer, IGuiderConsu
 
         // Mark session fully synced so CacheReplayEngine skips it next pass.
         if (localSessionId is not null)
-            _cache.MarkSessionReplayed(localSessionId);
+            _frameCache.MarkSessionReplayed(localSessionId);
 
         Logger.Info("[Subframes] Session ended.");
         SessionEnded?.Invoke(this, EventArgs.Empty);
@@ -527,7 +527,7 @@ public sealed class SessionService : IDisposable, IFocuserConsumer, IGuiderConsu
                 {
                     DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull
                 });
-            _cache.InsertTarget(localTargetId, localSessionId, targetJson);
+            _frameCache.InsertTarget(localTargetId, localSessionId, targetJson);
         }
 
         var targetId = await _apiClient.StartTargetAsync(request, ct);
@@ -538,7 +538,7 @@ public sealed class SessionService : IDisposable, IFocuserConsumer, IGuiderConsu
 
         if (targetId is not null)
         {
-            _cache.MarkTargetAcked(localTargetId, targetId);
+            _frameCache.MarkTargetAcked(localTargetId, targetId);
             Logger.Info($"[Subframes] Target started: {targetId} name='{targetName}'");
         }
         else
@@ -565,7 +565,7 @@ public sealed class SessionService : IDisposable, IFocuserConsumer, IGuiderConsu
 
         // Record end locally for replay.
         if (localTargetId is not null)
-            _cache.MarkTargetEnded(localTargetId, DateTime.UtcNow.ToString("o"));
+            _frameCache.MarkTargetEnded(localTargetId, DateTime.UtcNow.ToString("o"));
 
         if (targetId is null) return; // offline target — replay engine handles the EndTarget call
 
@@ -752,14 +752,14 @@ public sealed class SessionService : IDisposable, IFocuserConsumer, IGuiderConsu
                 {
                     DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull
                 });
-            _cache.InsertSession(localId, idempotencyKey, startJson);
+            _frameCache.InsertSession(localId, idempotencyKey, startJson);
 
             var sessionId = await _apiClient.StartSessionAsync(
                 request with { IdempotencyKey = idempotencyKey }, CancellationToken.None);
 
             var activeId = sessionId ?? localId;
             if (sessionId is not null)
-                _cache.MarkSessionAcked(localId, sessionId);
+                _frameCache.MarkSessionAcked(localId, sessionId);
 
             _activeSessionId      = activeId;
             _activeLocalSessionId = localId;
@@ -1133,14 +1133,14 @@ public sealed class SessionService : IDisposable, IFocuserConsumer, IGuiderConsu
                 {
                     DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull
                 });
-            _cache.InsertSession(localId, idempotencyKey, startJson);
+            _frameCache.InsertSession(localId, idempotencyKey, startJson);
 
             var sessionId = await _apiClient.StartSessionAsync(
                 request with { IdempotencyKey = idempotencyKey }, CancellationToken.None);
 
             var activeId = sessionId ?? localId;
             if (sessionId is not null)
-                _cache.MarkSessionAcked(localId, sessionId);
+                _frameCache.MarkSessionAcked(localId, sessionId);
 
             _activeSessionId      = activeId;
             _activeLocalSessionId = localId;
@@ -1450,7 +1450,7 @@ public sealed class SessionService : IDisposable, IFocuserConsumer, IGuiderConsu
                     {
                         DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull
                     });
-                _cache.InsertEvent(localId, json);
+                _frameCache.InsertEvent(localId, json);
                 Logger.Debug($"[Subframes] Event cached (offline session): type={request.EventType}");
             }
             catch (Exception ex)

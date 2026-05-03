@@ -5,7 +5,7 @@ namespace Subframes.NinaPlugin.Api;
 // ── Requests ─────────────────────────────────────────────────────────────────
 
 /// <summary>Body for POST /api/v1/ingest/session/start</summary>
-public sealed class StartSessionRequest
+public sealed record class StartSessionRequest
 {
     [JsonPropertyName("targetName")]
     public required string TargetName { get; init; }
@@ -190,7 +190,7 @@ public sealed class HeartbeatRequest
 }
 
 /// <summary>Body for POST /api/v1/ingest/session/target/start</summary>
-public sealed class StartSessionTargetRequest
+public sealed record class StartSessionTargetRequest
 {
     [JsonPropertyName("sessionId")]
     public required string SessionId { get; init; }
