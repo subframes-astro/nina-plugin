@@ -975,7 +975,7 @@ public sealed class SessionService : IDisposable, IFocuserConsumer, IGuiderConsu
                     EventType = "filter_change",
                     Timestamp = capturedAt,
                     Metadata  = new Dictionary<string, object?> { ["from"] = lastFilter, ["to"] = filter },
-                }, CancellationToken.None);
+                });
                 Logger.Debug($"[Subframes] Filter change event: {lastFilter} → {filter}");
             }
             if (filter != null) _lastEmittedFilter = filter;
@@ -1438,7 +1438,7 @@ public sealed class SessionService : IDisposable, IFocuserConsumer, IGuiderConsu
         var isOnline = localId is null || serverId != localId;
         if (isOnline)
         {
-            PostOrCacheEvent(request);
+            _ = _apiClient.PostEventAsync(request, CancellationToken.None);
         }
         else if (localId is not null)
         {
