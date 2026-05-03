@@ -55,6 +55,7 @@ public class SubframesPlugin : PluginBase, IPluginManifest, IPartImportsSatisfie
     private readonly IWeatherDataMediator _weatherDataMediator;
     private readonly FrameCache _frameCache;
     private readonly SyncEngine _syncEngine;
+    private readonly Data.CacheReplayEngine? _replayEngine;
     private readonly bool _isPrimary;
 
     // Optional import: ISequenceMediator may not be available in all NINA
@@ -163,14 +164,19 @@ public class SubframesPlugin : PluginBase, IPluginManifest, IPartImportsSatisfie
         _tsDetector = new TargetSchedulerDetector(_options.TsApiPort);
         TsHelper.Configure(_options.TsDatabasePath);
         _sessionService = new SessionService(imageSaveMediator, _apiClient, _options, _frameCache, _syncEngine, safetyMonitorMediator, guiderMediator, weatherDataMediator, rotatorMediator, telescopeMediator, focuserMediator);
+        _replayEngine = new Data.CacheReplayEngine(_frameCache, _apiClient, _options, () => _sessionService.HasActiveSession);
         _sessionService.SessionStarted += OnSessionStarted;
         _sessionService.TsPreviewCallback = OnImageSavedTsPreviewCheck;
+        // Wire live-session pause/resume into the replay engine.
+        _sessionService.SessionStarted  += (_, _) => _replayEngine.PauseForLiveSession();
+        _sessionService.SessionEnded    += (_, _) => _replayEngine.ResumeAfterLiveSession();
         _optionsVm = new OptionsPanelViewModel(this);
 
         if (_options.IsEnabled && !string.IsNullOrWhiteSpace(_options.ApiKey))
         {
             StartStationHeartbeat();
             _syncEngine.Start();
+            _replayEngine.Start();
         }
 
         var pending = _frameCache.GetPendingCount();
@@ -183,6 +189,9 @@ public class SubframesPlugin : PluginBase, IPluginManifest, IPartImportsSatisfie
     // Expose singletons so MEF-constructed sequence items can import them.
     public SessionService SessionService => _sessionService;
     public OptionsPanelViewModel OptionsVM => _optionsVm;
+
+    /// <summary>Exposed so <see cref="UI.OptionsPanelViewModel"/> can poll replay progress.</summary>
+    internal Data.CacheReplayEngine? ReplayEngine => _replayEngine;
 
     /// <summary>
     /// The shared plugin options instance. OptionsPanelViewModel uses this directly
@@ -297,11 +306,13 @@ public class SubframesPlugin : PluginBase, IPluginManifest, IPartImportsSatisfie
         {
             StartStationHeartbeat();
             _syncEngine.Start();
+            _replayEngine?.Start();
         }
         else
         {
             StopStationHeartbeat();
             _syncEngine.Stop();
+            _replayEngine?.Stop();
         }
     }
 
@@ -360,6 +371,7 @@ public class SubframesPlugin : PluginBase, IPluginManifest, IPartImportsSatisfie
             _tsDetector?.Dispose();
             _tsDetector = null;
             _tsPreviewClient = null;
+            _replayEngine?.Dispose();
             _syncEngine.Dispose();
             _sessionService.Dispose();
             _frameCache.Dispose();

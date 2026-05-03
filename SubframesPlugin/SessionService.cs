@@ -47,6 +47,12 @@ public sealed class SessionService : IDisposable, IFocuserConsumer, IGuiderConsu
     private volatile string? _activeSessionTargetId;
     private int _frameCounter;
 
+    // Local cache IDs used for offline reconciliation.
+    // _activeLocalSessionId is the SQLite local_id; if the session started online
+    // it equals the server session ID (session is immediately acked).
+    private volatile string? _activeLocalSessionId;
+    private volatile string? _activeLocalTargetId;
+
     // Session status — "active", "waiting", "paused". Volatile for cross-thread visibility.
     private volatile string _sessionStatus = "active";
 
@@ -270,6 +276,9 @@ public sealed class SessionService : IDisposable, IFocuserConsumer, IGuiderConsu
     /// </summary>
     public event EventHandler? SessionStarted;
 
+    /// <summary>Raised after an active session ends (both manual and auto).</summary>
+    public event EventHandler? SessionEnded;
+
     // Callback invoked after each image save so the TS preview state machine can decide
     // whether to fetch a fresh preview based on imaging activity.  Set by Plugin.cs.
     private Action? _tsPreviewCallback;
@@ -298,8 +307,38 @@ public sealed class SessionService : IDisposable, IFocuserConsumer, IGuiderConsu
         StartSessionRequest request,
         CancellationToken ct = default)
     {
-        var sessionId = await _apiClient.StartSessionAsync(request, ct);
-        _activeSessionId = sessionId;
+        // Generate a local ID before the API call so frames can be cached
+        // even if the server is unreachable (offline-first session tracking).
+        var localId         = Guid.NewGuid().ToString();
+        var idempotencyKey  = $"{_options.InstanceId}:{DateTimeOffset.UtcNow.ToUnixTimeSeconds()}";
+        var startJson       = System.Text.Json.JsonSerializer.Serialize(
+            request,
+            new System.Text.Json.JsonSerializerOptions
+            {
+                DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull
+            });
+        _frameCache.InsertSession(localId, idempotencyKey, startJson);
+
+        // Try live API call with idempotency key for safe replay.
+        var requestWithKey = request with { IdempotencyKey = idempotencyKey };
+        var sessionId      = await _apiClient.StartSessionAsync(requestWithKey, ct);
+
+        if (sessionId is not null)
+        {
+            // Session created on server — ack it and remap any pre-cached frames.
+            _frameCache.MarkSessionAcked(localId, sessionId);
+        }
+        else
+        {
+            // API unreachable — use local ID as fallback so frames can still be cached.
+            // CacheReplayEngine will promote this session when connectivity returns.
+            Logger.Warning($"[Subframes] StartSession failed — caching locally as {localId} for later replay.");
+        }
+
+        // Use server ID when available; fall back to local ID for offline caching.
+        var activeId = sessionId ?? localId;
+        _activeSessionId       = activeId;
+        _activeLocalSessionId  = localId;
         Interlocked.Exchange(ref _frameCounter, 0);
         Interlocked.Exchange(ref _skippedExposures, 0);
         Interlocked.Exchange(ref _failedExposures, 0);
@@ -310,39 +349,37 @@ public sealed class SessionService : IDisposable, IFocuserConsumer, IGuiderConsu
             Logger.Info($"[Subframes] Session started: {sessionId} target='{request.TargetName}'");
             if (_options.IsDebugEnabled)
                 Logger.Info($"[Subframes] Session start confirmed: sessionId={sessionId} target='{request.TargetName}'");
-            _isManualSession = true;
-            // Store null when target name is empty or "Unknown Target" so
-            // OnTargetDetectedAsync will adopt the real target from the first
-            // DSO container start or image save — instead of displaying a
-            // bogus "Unknown Target" in heartbeats until then.
-            _currentTarget = string.IsNullOrEmpty(request.TargetName)
-                || string.Equals(request.TargetName, "Unknown Target", StringComparison.OrdinalIgnoreCase)
-                    ? null
-                    : request.TargetName;
-            _activeSessionTargetId = null;
-            _sessionStatus = "active";
-            _snapshot = new HeartbeatSnapshot(null, null, null);
-            _lastEmittedFilter = null;
-            _lastGuiderWasGuiding = false;
-            _lastIsSafeState = -1;
-            _sessionStartTime = DateTime.UtcNow;
-            StartHeartbeatTimer(sessionId);
-            StartYieldPollTimer();
-            SessionStarted?.Invoke(this, EventArgs.Empty);
-            RegisterSessionEventConsumers();
         }
-        else
-        {
-            Logger.Warning("[Subframes] Failed to start session — exposures will not be recorded.");
-        }
+        _isManualSession = true;
+        // Store null when target name is empty or "Unknown Target" so
+        // OnTargetDetectedAsync will adopt the real target from the first
+        // DSO container start or image save — instead of displaying a
+        // bogus "Unknown Target" in heartbeats until then.
+        _currentTarget = string.IsNullOrEmpty(request.TargetName)
+            || string.Equals(request.TargetName, "Unknown Target", StringComparison.OrdinalIgnoreCase)
+                ? null
+                : request.TargetName;
+        _activeSessionTargetId = null;
+        _activeLocalTargetId   = null;
+        _sessionStatus = "active";
+        _snapshot = new HeartbeatSnapshot(null, null, null);
+        _lastEmittedFilter = null;
+        _lastGuiderWasGuiding = false;
+        _lastIsSafeState = -1;
+        _sessionStartTime = DateTime.UtcNow;
+        StartHeartbeatTimer(activeId);
+        StartYieldPollTimer();
+        SessionStarted?.Invoke(this, EventArgs.Empty);
+        RegisterSessionEventConsumers();
 
-        return sessionId;
+        return sessionId; // null signals offline mode to the caller
     }
 
     /// <summary>End the active session and clear state.</summary>
     public async Task EndSessionAsync(CancellationToken ct = default)
     {
-        var sessionId = _activeSessionId;
+        var sessionId      = _activeSessionId;
+        var localSessionId = _activeLocalSessionId;
         if (sessionId is null) return;
 
         if (_options.IsDebugEnabled)
@@ -365,6 +402,10 @@ public sealed class SessionService : IDisposable, IFocuserConsumer, IGuiderConsu
         int? skipped = _trackingExposureYield ? _skippedExposures : null;
         int? failed  = _trackingExposureYield ? _failedExposures  : null;
 
+        // Record the end locally so CacheReplayEngine can send EndSession if the API call fails.
+        if (localSessionId is not null)
+            _frameCache.MarkSessionEnded(localSessionId, DateTime.UtcNow.ToString("o"), skipped, failed);
+
         // Query TS for per-frame grading results and all-time progress before clearing state.
         var sessionEnd = DateTime.UtcNow;
         var tsGrading  = TsGradingReader.ReadGradingResults(_sessionStartTime, sessionEnd);
@@ -372,8 +413,10 @@ public sealed class SessionService : IDisposable, IFocuserConsumer, IGuiderConsu
         var tsProgress = TsProgressReader.ReadProgress();
         Logger.Info($"[Subframes] TS progress results: {tsProgress?.Count ?? 0} row(s).");
 
-        _activeSessionId = null;
+        _activeSessionId       = null;
+        _activeLocalSessionId  = null;
         _activeSessionTargetId = null;
+        _activeLocalTargetId   = null;
         _sessionStatus = "active";
         await _apiClient.EndSessionAsync(sessionId, skipped, failed, ct);
 
@@ -389,7 +432,12 @@ public sealed class SessionService : IDisposable, IFocuserConsumer, IGuiderConsu
             await _apiClient.PostTsProgressAsync(sessionId, tsProgress, ct);
         }
 
+        // Mark session fully synced so CacheReplayEngine skips it next pass.
+        if (localSessionId is not null)
+            _frameCache.MarkSessionReplayed(localSessionId);
+
         Logger.Info("[Subframes] Session ended.");
+        SessionEnded?.Invoke(this, EventArgs.Empty);
     }
 
     /// <summary>Clear the active session without notifying the server.</summary>
@@ -397,7 +445,10 @@ public sealed class SessionService : IDisposable, IFocuserConsumer, IGuiderConsu
     {
         StopHeartbeatTimer();
         UnregisterSessionEventConsumers();
-        _activeSessionId = null;
+        _activeSessionId      = null;
+        _activeLocalSessionId = null;
+        _activeSessionTargetId = null;
+        _activeLocalTargetId   = null;
         Logger.Info("[Subframes] Session cleared.");
     }
 
@@ -445,7 +496,8 @@ public sealed class SessionService : IDisposable, IFocuserConsumer, IGuiderConsu
         string? targetType = null,
         CancellationToken ct = default)
     {
-        var sessionId = _activeSessionId;
+        var sessionId      = _activeSessionId;
+        var localSessionId = _activeLocalSessionId;
         if (sessionId is null) return null;
 
         // RA=0/Dec=0 is the vernal equinox — not a real DSO target.
@@ -456,6 +508,8 @@ public sealed class SessionService : IDisposable, IFocuserConsumer, IGuiderConsu
             return null;
         }
 
+        // Cache the target locally before the API call.
+        var localTargetId = Guid.NewGuid().ToString();
         var request = new StartSessionTargetRequest
         {
             SessionId  = sessionId,
@@ -465,14 +519,32 @@ public sealed class SessionService : IDisposable, IFocuserConsumer, IGuiderConsu
             StartTime  = DateTime.UtcNow.ToString("o"),
             TargetType = targetType,
         };
+        if (localSessionId is not null)
+        {
+            var targetJson = System.Text.Json.JsonSerializer.Serialize(
+                request,
+                new System.Text.Json.JsonSerializerOptions
+                {
+                    DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull
+                });
+            _frameCache.InsertTarget(localTargetId, localSessionId, targetJson);
+        }
 
         var targetId = await _apiClient.StartTargetAsync(request, ct);
+        _activeLocalTargetId   = localTargetId;
         _activeSessionTargetId = targetId;
-        _currentTarget = targetName;
-        _sessionStatus = "active";
+        _currentTarget         = targetName;
+        _sessionStatus         = "active";
 
         if (targetId is not null)
+        {
+            _frameCache.MarkTargetAcked(localTargetId, targetId);
             Logger.Info($"[Subframes] Target started: {targetId} name='{targetName}'");
+        }
+        else
+        {
+            Logger.Warning($"[Subframes] StartTarget failed — cached locally as {localTargetId} for replay.");
+        }
 
         return targetId;
     }
@@ -483,11 +555,19 @@ public sealed class SessionService : IDisposable, IFocuserConsumer, IGuiderConsu
     /// </summary>
     public async Task EndTargetAsync(CancellationToken ct = default)
     {
-        var sessionId = _activeSessionId;
-        var targetId  = _activeSessionTargetId;
-        if (sessionId is null || targetId is null) return;
+        var sessionId      = _activeSessionId;
+        var targetId       = _activeSessionTargetId;
+        var localTargetId  = _activeLocalTargetId;
+        if (sessionId is null || (targetId is null && localTargetId is null)) return;
 
         _activeSessionTargetId = null;
+        _activeLocalTargetId   = null;
+
+        // Record end locally for replay.
+        if (localTargetId is not null)
+            _frameCache.MarkTargetEnded(localTargetId, DateTime.UtcNow.ToString("o"));
+
+        if (targetId is null) return; // offline target — replay engine handles the EndTarget call
 
         var request = new EndSessionTargetRequest
         {
@@ -664,8 +744,25 @@ public sealed class SessionService : IDisposable, IFocuserConsumer, IGuiderConsu
                 Timezone              = ResolveIanaTimezone(),
             };
 
-            var sessionId = await _apiClient.StartSessionAsync(request, CancellationToken.None);
-            _activeSessionId = sessionId;
+            var localId        = Guid.NewGuid().ToString();
+            var idempotencyKey = $"{options.InstanceId}:{DateTimeOffset.UtcNow.ToUnixTimeSeconds()}";
+            var startJson      = System.Text.Json.JsonSerializer.Serialize(
+                request,
+                new System.Text.Json.JsonSerializerOptions
+                {
+                    DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull
+                });
+            _frameCache.InsertSession(localId, idempotencyKey, startJson);
+
+            var sessionId = await _apiClient.StartSessionAsync(
+                request with { IdempotencyKey = idempotencyKey }, CancellationToken.None);
+
+            var activeId = sessionId ?? localId;
+            if (sessionId is not null)
+                _frameCache.MarkSessionAcked(localId, sessionId);
+
+            _activeSessionId      = activeId;
+            _activeLocalSessionId = localId;
             Interlocked.Exchange(ref _frameCounter, 0);
 
             if (sessionId is not null)
@@ -677,14 +774,23 @@ public sealed class SessionService : IDisposable, IFocuserConsumer, IGuiderConsu
                 _sessionStatus = "active";
                 _snapshot = new HeartbeatSnapshot(null, null, null);
                 _sessionStartTime = DateTime.UtcNow;
-                StartHeartbeatTimer(sessionId);
+                StartHeartbeatTimer(activeId);
                 StartYieldPollTimer();
                 RegisterSessionEventConsumers();
                 Logger.Info($"[Subframes] Auto-session started on sequence start: sessionId={sessionId} target='{resolvedTarget}'");
             }
             else
             {
-                Logger.Warning("[Subframes] Auto-session start on sequence start failed — session will start on first exposure instead.");
+                // Offline — start session from cached local ID so frames can be cached.
+                _isManualSession = false;
+                _currentTarget = hasTarget ? resolvedTarget : null;
+                _sessionStatus = "active";
+                _snapshot = new HeartbeatSnapshot(null, null, null);
+                _sessionStartTime = DateTime.UtcNow;
+                StartHeartbeatTimer(activeId);
+                StartYieldPollTimer();
+                RegisterSessionEventConsumers();
+                Logger.Warning($"[Subframes] Auto-session offline: caching locally as {localId} for replay.");
             }
         }
         catch (Exception ex)
@@ -863,13 +969,13 @@ public sealed class SessionService : IDisposable, IFocuserConsumer, IGuiderConsu
             if (filter != null && lastFilter != null
                 && !string.Equals(filter, lastFilter, StringComparison.OrdinalIgnoreCase))
             {
-                _ = _apiClient.PostEventAsync(new EventRequest
+                PostOrCacheEvent(new EventRequest
                 {
                     SessionId = sessionId,
                     EventType = "filter_change",
                     Timestamp = capturedAt,
                     Metadata  = new Dictionary<string, object?> { ["from"] = lastFilter, ["to"] = filter },
-                }, CancellationToken.None);
+                });
                 Logger.Debug($"[Subframes] Filter change event: {lastFilter} → {filter}");
             }
             if (filter != null) _lastEmittedFilter = filter;
@@ -1019,29 +1125,44 @@ public sealed class SessionService : IDisposable, IFocuserConsumer, IGuiderConsu
                 Timezone             = ResolveIanaTimezone(),
             };
 
-            var sessionId = await _apiClient.StartSessionAsync(request, CancellationToken.None);
-            _activeSessionId = sessionId;
+            var localId        = Guid.NewGuid().ToString();
+            var idempotencyKey = $"{options.InstanceId}:{DateTimeOffset.UtcNow.ToUnixTimeSeconds()}";
+            var startJson      = System.Text.Json.JsonSerializer.Serialize(
+                request,
+                new System.Text.Json.JsonSerializerOptions
+                {
+                    DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull
+                });
+            _frameCache.InsertSession(localId, idempotencyKey, startJson);
+
+            var sessionId = await _apiClient.StartSessionAsync(
+                request with { IdempotencyKey = idempotencyKey }, CancellationToken.None);
+
+            var activeId = sessionId ?? localId;
+            if (sessionId is not null)
+                _frameCache.MarkSessionAcked(localId, sessionId);
+
+            _activeSessionId      = activeId;
+            _activeLocalSessionId = localId;
             Interlocked.Exchange(ref _frameCounter, 0);
 
+            _isManualSession = false;
+            _currentTarget = targetName;
+            _snapshot = new HeartbeatSnapshot(null, null, null);
+            _lastEmittedFilter = null;
+            _lastGuiderWasGuiding = false;
+            _lastIsSafeState = -1;
+            _sessionStartTime = DateTime.UtcNow;
+            StartHeartbeatTimer(activeId);
+            StartYieldPollTimer();
+            RegisterSessionEventConsumers();
+
             if (sessionId is not null)
-            {
-                _isManualSession = false;
                 Logger.Info($"[Subframes] Auto-session started: target='{targetName}' (trigger: {reason})");
-                _currentTarget = targetName;
-                _snapshot = new HeartbeatSnapshot(null, null, null);
-                _lastEmittedFilter = null;
-                _lastGuiderWasGuiding = false;
-                _lastIsSafeState = -1;
-                _sessionStartTime = DateTime.UtcNow;
-                StartHeartbeatTimer(sessionId);
-                StartYieldPollTimer();
-                RegisterSessionEventConsumers();
-                await PostFrameAsync(sessionId, e);
-            }
             else
-            {
-                Logger.Warning("[Subframes] Auto-session start failed — API unreachable?");
-            }
+                Logger.Warning($"[Subframes] Auto-session offline: caching locally as {localId} (trigger: {reason})");
+
+            await PostFrameAsync(activeId, e);
         }
         catch (Exception ex)
         {
@@ -1303,6 +1424,42 @@ public sealed class SessionService : IDisposable, IFocuserConsumer, IGuiderConsu
         catch { /* ignore */ }
     }
 
+    // ── Cache-aware event posting ────────────────────────────────────────────
+
+    /// <summary>
+    /// Posts a session event live when the session is server-acked; otherwise
+    /// caches it in <c>cached_events</c> for <see cref="Data.CacheReplayEngine"/> to replay.
+    /// Fire-and-forget — never throws.
+    /// </summary>
+    private void PostOrCacheEvent(EventRequest request)
+    {
+        var localId  = _activeLocalSessionId;
+        var serverId = _activeSessionId;
+        var isOnline = localId is null || serverId != localId;
+        if (isOnline)
+        {
+            _ = _apiClient.PostEventAsync(request, CancellationToken.None);
+        }
+        else if (localId is not null)
+        {
+            try
+            {
+                var json = System.Text.Json.JsonSerializer.Serialize(
+                    request,
+                    new System.Text.Json.JsonSerializerOptions
+                    {
+                        DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull
+                    });
+                _frameCache.InsertEvent(localId, json);
+                Logger.Debug($"[Subframes] Event cached (offline session): type={request.EventType}");
+            }
+            catch (Exception ex)
+            {
+                Logger.Warning($"[Subframes] Failed to cache event: {ex.Message}");
+            }
+        }
+    }
+
     // ── IFocuserConsumer ─────────────────────────────────────────────────────
 
     /// <summary>
@@ -1328,7 +1485,7 @@ public sealed class SessionService : IDisposable, IFocuserConsumer, IGuiderConsu
                 (int)autofocusInfo.Position);
 
             Logger.Info($"[Subframes] UpdateEndAutoFocusRun called: session={sessionId} filter={autofocusInfo.Filter} position={autofocusInfo.Position} — posting autofocus event");
-            _ = _apiClient.PostEventAsync(request, CancellationToken.None);
+            PostOrCacheEvent(request);
         }
         catch (Exception ex)
         {
@@ -1365,12 +1522,12 @@ public sealed class SessionService : IDisposable, IFocuserConsumer, IGuiderConsu
             _lastGuiderWasGuiding = isNowGuiding;
 
             var eventType = isNowGuiding ? "guiding_start" : "guiding_stop";
-            _ = _apiClient.PostEventAsync(new EventRequest
+            PostOrCacheEvent(new EventRequest
             {
                 SessionId = sessionId,
                 EventType = eventType,
                 Timestamp = DateTime.UtcNow.ToString("o"),
-            }, CancellationToken.None);
+            });
             Logger.Debug($"[Subframes] {eventType} event queued: session={sessionId}");
         }
         catch (Exception ex)
@@ -1401,13 +1558,13 @@ public sealed class SessionService : IDisposable, IFocuserConsumer, IGuiderConsu
             if (prevSafeState == -1 || (prevSafeState == 1) == nowSafe) return; // No change or first reading.
 
             var eventType = nowSafe ? "safety_safe" : "safety_unsafe";
-            _ = _apiClient.PostEventAsync(new EventRequest
+            PostOrCacheEvent(new EventRequest
             {
                 SessionId = sessionId,
                 EventType = eventType,
                 Timestamp = DateTime.UtcNow.ToString("o"),
                 Metadata  = new Dictionary<string, object?> { ["isSafe"] = nowSafe },
-            }, CancellationToken.None);
+            });
             Logger.Debug($"[Subframes] {eventType} event queued: session={sessionId} isSafe={nowSafe}");
         }
         catch (Exception ex)
@@ -1436,7 +1593,7 @@ public sealed class SessionService : IDisposable, IFocuserConsumer, IGuiderConsu
                 Timestamp = DateTime.UtcNow.ToString("o"),
                 Metadata  = new Dictionary<string, object?> { ["success"] = e.Success },
             };
-            _ = _apiClient.PostEventAsync(request, CancellationToken.None);
+            PostOrCacheEvent(request);
             Logger.Debug($"[Subframes] Meridian flip event queued: session={sessionId} success={e.Success}");
         }
         catch (Exception ex)

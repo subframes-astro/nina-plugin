@@ -5,7 +5,7 @@ namespace Subframes.NinaPlugin.Api;
 // ── Requests ─────────────────────────────────────────────────────────────────
 
 /// <summary>Body for POST /api/v1/ingest/session/start</summary>
-public sealed class StartSessionRequest
+public sealed record class StartSessionRequest
 {
     [JsonPropertyName("targetName")]
     public required string TargetName { get; init; }
@@ -88,6 +88,15 @@ public sealed class StartSessionRequest
     [JsonPropertyName("timezone")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? Timezone { get; init; }
+
+    /// <summary>
+    /// Idempotency key for replay safety: <c>"{instanceId}:{startTimeUnix}"</c>.
+    /// The server creates the session on the first call and returns the same ID on repeats.
+    /// Null during normal live sessions; populated only on offline-replay attempts.
+    /// </summary>
+    [JsonPropertyName("idempotencyKey")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? IdempotencyKey { get; init; }
 }
 
 /// <summary>A single planned target sourced from Target Scheduler.</summary>
@@ -181,7 +190,7 @@ public sealed class HeartbeatRequest
 }
 
 /// <summary>Body for POST /api/v1/ingest/session/target/start</summary>
-public sealed class StartSessionTargetRequest
+public sealed record class StartSessionTargetRequest
 {
     [JsonPropertyName("sessionId")]
     public required string SessionId { get; init; }

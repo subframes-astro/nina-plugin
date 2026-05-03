@@ -47,6 +47,20 @@ public class PluginOptions
     /// <summary>Hours to retain synced frames before pruning (default 72 = 3 days).</summary>
     public int CacheRetentionHours { get; set; } = 72;
 
+    // ── Cache Replay (C1a rate limiter) ──────────────────────────────────────
+
+    /// <summary>Sustained token refill rate for the replay engine (requests per second, default 10).</summary>
+    public int ReplayRateReqPerSec { get; set; } = 10;
+
+    /// <summary>Burst capacity for the replay token bucket (default 20).</summary>
+    public int ReplayBurstCapacity { get; set; } = 20;
+
+    /// <summary>Maximum frames per batch during cache replay (default 50).</summary>
+    public int ReplayFramesPerBatch { get; set; } = 50;
+
+    /// <summary>Seconds to wait between replaying consecutive sessions (default 2).</summary>
+    public int ReplayInterSessionDelaySeconds { get; set; } = 2;
+
     // ── Auto-Session Detection ───────────────────────────────────────────────
 
     /// <summary>When true, automatically start/end sessions based on target changes and inactivity.</summary>
