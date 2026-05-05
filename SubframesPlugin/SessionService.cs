@@ -95,6 +95,19 @@ public sealed class SessionService : IDisposable, IFocuserConsumer, IGuiderConsu
     /// <summary>Replace non-finite doubles (NaN, ±Infinity) with null so JSON serialization never throws.</summary>
     private static double? Finite(double? v) => v is double d && double.IsFinite(d) ? v : null;
 
+    /// <summary>
+    /// Replace non-finite or negative doubles with null.
+    /// NINA uses -1 as a sentinel for "not available" on metrics that are physically non-negative
+    /// (HFR, FWHM, Eccentricity, RMS errors).  Sending -1 to the backend fails gte=0 validation.
+    /// </summary>
+    private static double? NonNegative(double? v) => v is double d && double.IsFinite(d) && d >= 0 ? d : null;
+
+    /// <summary>
+    /// Replace negative integers with null.
+    /// NINA uses -1 as a sentinel for "not available" on integer metrics such as Gain, Offset, and DetectedStars.
+    /// </summary>
+    private static int? NonNegativeInt(int? v) => v is int i && i >= 0 ? i : null;
+
     // Delegate to the shared TimezoneHelper to avoid duplication.
     private static string ResolveIanaTimezone() => TimezoneHelper.ResolveIanaTimezone();
 
@@ -890,9 +903,9 @@ public sealed class SessionService : IDisposable, IFocuserConsumer, IGuiderConsu
                 var guiderInfo = _guiderMediator?.GetInfo();
                 if (guiderInfo is { Connected: true } && guiderInfo.RMSError.Total.Arcseconds > 0)
                 {
-                    rmsRa    = Finite(guiderInfo.RMSError.RA.Arcseconds);
-                    rmsDec   = Finite(guiderInfo.RMSError.Dec.Arcseconds);
-                    rmsTotal = Finite(guiderInfo.RMSError.Total.Arcseconds);
+                    rmsRa    = NonNegative(guiderInfo.RMSError.RA.Arcseconds);
+                    rmsDec   = NonNegative(guiderInfo.RMSError.Dec.Arcseconds);
+                    rmsTotal = NonNegative(guiderInfo.RMSError.Total.Arcseconds);
                 }
             }
             catch { /* guider not available — leave null */ }
@@ -952,7 +965,7 @@ public sealed class SessionService : IDisposable, IFocuserConsumer, IGuiderConsu
             var (meanAdu, medianAdu, stdevAdu, madAdu, minAdu, maxAdu, bitDepth) = ReadImageStatistics(e);
 
             // Update heartbeat snapshot atomically so the timer always reads consistent state.
-            _snapshot = new HeartbeatSnapshot(filter, Finite(hfr), rmsTotal);
+            _snapshot = new HeartbeatSnapshot(filter, NonNegative(hfr), rmsTotal);
 
             // If the session was in a waiting/paused state, a new exposure means we're active again.
             // Fire-and-forget the status transition; don't block the imaging path.
@@ -987,14 +1000,14 @@ public sealed class SessionService : IDisposable, IFocuserConsumer, IGuiderConsu
                 ExposureTime    = meta.Image?.ExposureTime ?? 0.0,
                 CapturedAt      = capturedAt,
                 Filter          = filter,
-                Gain            = meta.Camera?.Gain,
-                Offset          = meta.Camera?.Offset,
+                Gain            = NonNegativeInt(meta.Camera?.Gain),
+                Offset          = NonNegativeInt(meta.Camera?.Offset),
                 Binning         = meta.Camera?.BinX is int b ? (short)b : null,
-                Hfr             = Finite(hfr),
-                HfrStdev        = Finite(e.StarDetectionAnalysis?.HFRStDev),
-                StarCount       = e.StarDetectionAnalysis?.DetectedStars,
-                Fwhm            = Finite(ReadReflectedDouble(e.StarDetectionAnalysis, ref _fwhmProp, ref _fwhmResolved, "FWHM", "StarFWHM")),
-                Eccentricity    = Finite(ReadReflectedDouble(e.StarDetectionAnalysis, ref _eccentricityProp, ref _eccentricityResolved, "Eccentricity")),
+                Hfr             = NonNegative(hfr),
+                HfrStdev        = NonNegative(e.StarDetectionAnalysis?.HFRStDev),
+                StarCount       = NonNegativeInt(e.StarDetectionAnalysis?.DetectedStars),
+                Fwhm            = NonNegative(ReadReflectedDouble(e.StarDetectionAnalysis, ref _fwhmProp, ref _fwhmResolved, "FWHM", "StarFWHM")),
+                Eccentricity    = NonNegative(ReadReflectedDouble(e.StarDetectionAnalysis, ref _eccentricityProp, ref _eccentricityResolved, "Eccentricity")),
                 CameraTemp      = Finite(meta.Camera?.Temperature),
                 RmsRa           = rmsRa,
                 RmsDec          = rmsDec,
