@@ -835,7 +835,7 @@ public class SubframesPlugin : PluginBase, IPluginManifest, IPartImportsSatisfie
             // This is the only place this fetch is triggered from Idle - the Active state
             // is already handled by OnImageSavedTsPreviewCheck and RunTsPreviewFloorTimerAsync.
             //
-            // We delay 60 seconds before fetching because TS needs time after its API
+            // We delay 120 seconds before fetching because TS needs time after its API
             // comes online to fully compute the schedule for all targets.  Fetching
             // immediately returns an incomplete plan (e.g. 1-2 blocks instead of 6+).
             if (newState == "active"
@@ -847,8 +847,8 @@ public class SubframesPlugin : PluginBase, IPluginManifest, IPartImportsSatisfie
                 {
                     try
                     {
-                        Logger.Info("[Subframes] One-shot TS preview: waiting 60 s for TS to compute full schedule.");
-                        await Task.Delay(TimeSpan.FromSeconds(60), fetchCt).ConfigureAwait(false);
+                        Logger.Info("[Subframes] One-shot TS preview: waiting 120 s for TS to compute full schedule.");
+                        await Task.Delay(TimeSpan.FromSeconds(120), fetchCt).ConfigureAwait(false);
 
                         await FetchAndUpdateTsPreviewAsync(fetchCt).ConfigureAwait(false);
                         var blockCount = _currentTsPreview?.Blocks?.Count ?? 0;
