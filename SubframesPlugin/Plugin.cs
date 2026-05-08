@@ -822,12 +822,46 @@ public class SubframesPlugin : PluginBase, IPluginManifest, IPartImportsSatisfie
     /// Debouncing: if a heartbeat was sent within the last 2 seconds (e.g. by the periodic
     /// timer or a rapid back-to-back state oscillation), this send is suppressed.  The
     /// timestamp is updated atomically with <see cref="Interlocked.Exchange(ref long, long)"/>.
+    /// <para>
+    /// One-shot preview fetch: when TS transitions to <c>active</c> while in the <c>Idle</c>
+    /// state and no preview has been cached yet, a background fetch is kicked off so the
+    /// first station heartbeat after startup already carries <c>TsPreview</c> data.  This
+    /// allows the Tonight's Plan email to fire before any imaging session begins.
+    /// </para>
     /// </remarks>
     private void OnTsStateChanged(object? sender, string newState)
     {
         try
         {
             if (!_isPrimary || !_options.IsEnabled) return;
+
+            // One-shot pre-session TS preview fetch.
+            // When TS first becomes active while we are idle and have no cached preview,
+            // kick off a background fetch so the next heartbeat carries TsPreview data.
+            // This is the only place this fetch is triggered from Idle - the Active state
+            // is already handled by OnImageSavedTsPreviewCheck and RunTsPreviewFloorTimerAsync.
+            if (newState == "active"
+                && _tsPreviewState == TsPreviewState.Idle
+                && _currentTsPreview is null)
+            {
+                var fetchCt = _stationHeartbeatCts?.Token ?? CancellationToken.None;
+                _ = Task.Run(async () =>
+                {
+                    try
+                    {
+                        await FetchAndUpdateTsPreviewAsync(fetchCt).ConfigureAwait(false);
+                        Logger.Info("[Subframes] One-shot TS preview fetch complete (pre-session).");
+                        // Force an immediate heartbeat so the server gets the preview ASAP,
+                        // bypassing the normal 5-min periodic timer.
+                        Interlocked.Exchange(ref _lastStationHeartbeatSentTicks, DateTime.UtcNow.Ticks);
+                        _ = _apiClient.SendStationHeartbeatAsync(BuildStationHeartbeatRequest(), CancellationToken.None);
+                    }
+                    catch (Exception ex)
+                    {
+                        Logger.Debug($"[Subframes] One-shot TS preview fetch failed: {ex.Message}");
+                    }
+                });
+            }
 
             // Debounce: skip if a heartbeat was sent very recently to avoid a burst
             // from rapid state flapping or an exact collision with the periodic timer.
