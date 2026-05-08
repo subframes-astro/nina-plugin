@@ -19,9 +19,56 @@ namespace Subframes.NinaPlugin.Api;
 /// 3 times with 1 s / 2 s / 4 s exponential backoff on 5xx and network errors.
 /// 4xx errors (except 429) are not retried.
 /// Heartbeats are fire-and-forget and are not retried.
+///
+/// Thread safety: the auth header is injected per-request via
+/// <see cref="ApiKeyHandler"/> rather than written to
+/// <see cref="HttpClient.DefaultRequestHeaders"/>, which is not safe for
+/// concurrent writes from multiple heartbeat threads.
 /// </summary>
 public sealed class SubframesClient : IDisposable
 {
+    /// <summary>
+    /// Delegating handler that reads the current API key at send time and
+    /// injects it as a Bearer token on every outgoing <see cref="HttpRequestMessage"/>.
+    ///
+    /// Setting the header on the per-request message object is thread-safe
+    /// (each message is distinct).  This avoids the race condition that arises
+    /// when multiple concurrent callers write to the shared
+    /// <see cref="HttpClient.DefaultRequestHeaders"/> collection.
+    /// </summary>
+    private sealed class ApiKeyHandler : DelegatingHandler
+    {
+        private readonly PluginOptions _options;
+
+        public ApiKeyHandler(PluginOptions options)
+            : base(new HttpClientHandler())
+        {
+            _options = options;
+        }
+
+        protected override Task<HttpResponseMessage> SendAsync(
+            HttpRequestMessage request, CancellationToken ct)
+        {
+            var key = _options.ApiKey;
+            if (!string.IsNullOrWhiteSpace(key))
+            {
+                request.Headers.Authorization =
+                    new AuthenticationHeaderValue("Bearer", key);
+
+                if (_options.IsDebugEnabled)
+                {
+                    var preview = key.Length > 12 ? key[..12] + "..." : "(short key)";
+                    Logger.Info($"[Subframes] Auth header set: Bearer {preview}");
+                }
+            }
+            else if (_options.IsDebugEnabled)
+            {
+                Logger.Info("[Subframes] No API key configured — request will be unauthenticated");
+            }
+
+            return base.SendAsync(request, ct);
+        }
+    }
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
         PropertyNameCaseInsensitive = true,
@@ -37,33 +84,13 @@ public sealed class SubframesClient : IDisposable
     public SubframesClient(PluginOptions options)
     {
         _options = options;
-        _http = new HttpClient
+        _http = new HttpClient(new ApiKeyHandler(options))
         {
             Timeout = TimeSpan.FromSeconds(10)
         };
     }
 
     private string BaseUrl => _options.ApiBaseUrl.TrimEnd('/');
-
-    private void SetAuthHeader()
-    {
-        if (!string.IsNullOrWhiteSpace(_options.ApiKey))
-        {
-            _http.DefaultRequestHeaders.Authorization =
-                new AuthenticationHeaderValue("Bearer", _options.ApiKey);
-            if (_options.IsDebugEnabled)
-            {
-                var preview = _options.ApiKey.Length > 12
-                    ? _options.ApiKey[..12] + "..."
-                    : "(short key)";
-                Logger.Info($"[Subframes] Auth header set: Bearer {preview}");
-            }
-        }
-        else if (_options.IsDebugEnabled)
-        {
-            Logger.Info("[Subframes] No API key configured — request will be unauthenticated");
-        }
-    }
 
     // ── Retry helpers ───────────────────────────────────────────────────────
 
@@ -184,7 +211,6 @@ public sealed class SubframesClient : IDisposable
 
         try
         {
-            SetAuthHeader();
             var url = $"{BaseUrl}/api/v1/ingest/session/start";
             var jsonBytes = SerializeJson(request);
             if (_options.IsDebugEnabled)
@@ -230,7 +256,6 @@ public sealed class SubframesClient : IDisposable
 
         try
         {
-            SetAuthHeader();
             var url = $"{BaseUrl}/api/v1/ingest/session/end";
             var body = new EndSessionRequest
             {
@@ -269,7 +294,6 @@ public sealed class SubframesClient : IDisposable
 
         try
         {
-            SetAuthHeader();
             var url = $"{BaseUrl}/api/v1/ingest/session/target/start";
             var jsonBytes = SerializeJson(request);
             if (_options.IsDebugEnabled)
@@ -317,7 +341,6 @@ public sealed class SubframesClient : IDisposable
 
         try
         {
-            SetAuthHeader();
             var url = $"{BaseUrl}/api/v1/ingest/session/target/end";
             var jsonBytes = SerializeJson(request);
             if (_options.IsDebugEnabled)
@@ -355,7 +378,6 @@ public sealed class SubframesClient : IDisposable
 
         try
         {
-            SetAuthHeader();
             var url = $"{BaseUrl}/api/v1/ingest/session/status";
             var jsonBytes = SerializeJson(request);
             if (_options.IsDebugEnabled)
@@ -397,7 +419,6 @@ public sealed class SubframesClient : IDisposable
 
         try
         {
-            SetAuthHeader();
             var url = $"{BaseUrl}/api/v1/ingest/heartbeat";
             if (_options.IsDebugEnabled)
                 Logger.Info($"[Subframes] POST {url} body={JsonSerializer.Serialize(request, JsonOptions)}");
@@ -433,7 +454,6 @@ public sealed class SubframesClient : IDisposable
 
         try
         {
-            SetAuthHeader();
             var url = $"{BaseUrl}/api/v1/ingest/station/heartbeat";
             if (_options.IsDebugEnabled)
                 Logger.Info($"[Subframes] POST {url} body={JsonSerializer.Serialize(request, JsonOptions)}");
@@ -474,7 +494,6 @@ public sealed class SubframesClient : IDisposable
 
         try
         {
-            SetAuthHeader();
             var url = $"{BaseUrl}/api/v1/ingest/frame";
             var body = new IngestFramesRequest
             {
@@ -525,7 +544,6 @@ public sealed class SubframesClient : IDisposable
 
         try
         {
-            SetAuthHeader();
             var url = $"{BaseUrl}/api/v1/ingest/frame/thumbnail";
 
             using var form = new MultipartFormDataContent();
@@ -660,7 +678,6 @@ public sealed class SubframesClient : IDisposable
 
         try
         {
-            SetAuthHeader();
             var url = $"{BaseUrl}/api/v1/ingest/session/{sessionId}/ts-grading";
             var body = new TsGradingRequest { Entries = entries };
             var jsonBytes = SerializeJson(body);
@@ -704,7 +721,6 @@ public sealed class SubframesClient : IDisposable
 
         try
         {
-            SetAuthHeader();
             var url = $"{BaseUrl}/api/v1/ingest/session/{sessionId}/ts-progress";
             var body = new TsProgressRequest { Entries = entries };
             var jsonBytes = SerializeJson(body);
@@ -754,7 +770,6 @@ public sealed class SubframesClient : IDisposable
 
         try
         {
-            SetAuthHeader();
             var url = $"{BaseUrl}/api/v1/ingest/event";
             var jsonBytes = SerializeJson(request);
             if (_options.IsDebugEnabled)
