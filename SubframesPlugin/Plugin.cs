@@ -838,6 +838,10 @@ public class SubframesPlugin : PluginBase, IPluginManifest, IPartImportsSatisfie
             // kick off a background fetch so the next heartbeat carries TsPreview data.
             // This is the only place this fetch is triggered from Idle - the Active state
             // is already handled by OnImageSavedTsPreviewCheck and RunTsPreviewFloorTimerAsync.
+            //
+            // We delay 60 seconds before fetching because TS needs time after its API
+            // comes online to fully compute the schedule for all targets.  Fetching
+            // immediately returns an incomplete plan (e.g. 1-2 blocks instead of 6+).
             if (newState == "active"
                 && _tsPreviewState == TsPreviewState.Idle
                 && _currentTsPreview is null)
@@ -847,12 +851,17 @@ public class SubframesPlugin : PluginBase, IPluginManifest, IPartImportsSatisfie
                 {
                     try
                     {
+                        Logger.Info("[Subframes] One-shot TS preview: waiting 60 s for TS to compute full schedule.");
+                        await Task.Delay(TimeSpan.FromSeconds(60), fetchCt).ConfigureAwait(false);
+
                         await FetchAndUpdateTsPreviewAsync(fetchCt).ConfigureAwait(false);
-                        Logger.Info("[Subframes] One-shot TS preview fetch complete (pre-session).");
+                        var blockCount = _currentTsPreview?.Blocks?.Count ?? 0;
+                        Logger.Info($"[Subframes] One-shot TS preview fetch complete (pre-session, {blockCount} blocks).");
+
                         // The preview heartbeat is the most valuable one (it carries
                         // Tonight's Plan data).  If the debounce window would suppress
-                        // it (e.g. the startup-loop tick fired moments ago), wait it
-                        // out so we never silently drop the preview payload.
+                        // it (e.g. the periodic timer fired moments ago), wait it out
+                        // so we never silently drop the preview payload.
                         if (!TrySendStationHeartbeatDebounced("one-shot TS preview"))
                         {
                             try { await Task.Delay(TimeSpan.FromSeconds(3), fetchCt).ConfigureAwait(false); }
@@ -860,6 +869,7 @@ public class SubframesPlugin : PluginBase, IPluginManifest, IPartImportsSatisfie
                             TrySendStationHeartbeatDebounced("one-shot TS preview (retry after debounce)");
                         }
                     }
+                    catch (OperationCanceledException) { /* normal shutdown */ }
                     catch (Exception ex)
                     {
                         Logger.Debug($"[Subframes] One-shot TS preview fetch failed: {ex.Message}");
