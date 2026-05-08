@@ -79,8 +79,15 @@ internal sealed class TsPreviewClient
         {
             var url = $"http://localhost:{_port}/ts/v0/profiles/{profileId}/preview";
             var json = await _http.GetStringAsync(url, ct).ConfigureAwait(false);
+
+            // Log the raw JSON so we can diagnose incomplete schedule issues
+            // (e.g. TS returning 2 blocks instead of the expected 7).
+            Logger.Debug($"[Subframes] TsPreviewClient.FetchPreviewAsync raw response ({json.Length} chars): {(json.Length <= 4000 ? json : json[..4000] + "...(truncated)")}");
+
             var rawBlocks = JsonSerializer.Deserialize<List<TsPreviewBlockRaw>>(json, _jsonOptions);
             if (rawBlocks is null) return null;
+
+            Logger.Debug($"[Subframes] TsPreviewClient.FetchPreviewAsync: deserialized {rawBlocks.Count} raw blocks for profile '{profileName}'.");
 
             // Collect distinct target names from non-wait-period blocks for coordinate enrichment.
             // We match by name (not ID) because the TS preview HTTP API returns runtime GUIDs
@@ -97,6 +104,10 @@ internal sealed class TsPreviewClient
             // Filter out any blocks missing StartTime or EndTime — the backend requires both fields.
             // Well-behaved TS responses always include times for every block (including wait periods),
             // so this guard is purely defensive against malformed data.
+            var missingTimeBlocks = rawBlocks.Where(b => b.StartTime is null || b.EndTime is null).ToList();
+            if (missingTimeBlocks.Count > 0)
+                Logger.Warning($"[Subframes] TsPreviewClient.FetchPreviewAsync: {missingTimeBlocks.Count} block(s) dropped due to missing StartTime/EndTime: {string.Join(", ", missingTimeBlocks.Select(b => $"'{b.Name ?? "(null)"}' wait={b.WaitPeriod}"))}");
+
             var blocks = rawBlocks
                 .Where(b => b.StartTime is not null && b.EndTime is not null)
                 .Select(b =>
