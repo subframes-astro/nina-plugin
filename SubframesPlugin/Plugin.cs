@@ -1195,7 +1195,7 @@ public class SubframesPlugin : PluginBase, IPluginManifest, IPartImportsSatisfie
         {
             // When TS is not active, preserve the cached preview value - do not null it.
             // This keeps heartbeats carrying the last-known preview (e.g. post-dawn, Idle_CachedPreview state).
-            return;
+            return false;
         }
 
         try
@@ -1204,7 +1204,7 @@ public class SubframesPlugin : PluginBase, IPluginManifest, IPartImportsSatisfie
             if (profiles.Count == 0)
             {
                 // No profiles available - preserve the cached preview (do not null it).
-                return;
+                return false;
             }
 
             // Notify ViewModel if the profile list changed (compare by ID sequence).
