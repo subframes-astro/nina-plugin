@@ -83,6 +83,11 @@ public class SubframesPlugin : PluginBase, IPluginManifest, IPartImportsSatisfie
     private TargetSchedulerDetector? _tsDetector;
     private TsPreviewClient? _tsPreviewClient;
     private volatile TsPreviewDto? _currentTsPreview; // Written from preview fetches; read from BuildStationHeartbeatRequest
+    // Captured once at session start (fresh frame counts) and never overwritten mid-session.
+    // This prevents the preview from degrading as targets accumulate frames and fall out of
+    // the TS scheduler simulation.  Sent in heartbeats; falls back to _currentTsPreview for
+    // the pre-session one-shot case and post-dawn Idle_CachedPreview heartbeats.
+    private volatile TsPreviewDto? _initialNightPreview;
     // Written from the floor timer (thread pool); read from TsProfiles property.
     // Field assignment is atomic on .NET for reference types, so no lock needed for
     // the snapshot-replace pattern used here.
@@ -500,6 +505,9 @@ public class SubframesPlugin : PluginBase, IPluginManifest, IPartImportsSatisfie
         _tsPreviewState = TsPreviewState.Active;
         _tsPreviewStartupTime = DateTime.UtcNow;
         _tsLastPreviewFetch = DateTime.UtcNow;
+        // Clear any stale initial plan from a previous session so the new session
+        // captures a fresh snapshot at current (near-zero) frame counts.
+        _initialNightPreview = null;
         Logger.Info("[Subframes] TS preview state: -> ACTIVE (session started).");
 
         // Fire-and-forget: fetch preview with stabilization, then send heartbeat.
@@ -524,6 +532,12 @@ public class SubframesPlugin : PluginBase, IPluginManifest, IPartImportsSatisfie
                     if (newCount <= prevCount) break; // Stable — stop re-fetching.
                 }
 
+                // Cache the stabilized plan as the immutable initial night plan.
+                // All subsequent heartbeats will send this snapshot — not a re-fetched
+                // mid-session version that loses blocks as targets accumulate frames.
+                _initialNightPreview = _currentTsPreview;
+                var cachedCount = _initialNightPreview?.Blocks?.Count ?? 0;
+                Logger.Info($"[Subframes] OnSessionStarted: initial night plan cached ({cachedCount} blocks). Mid-session re-fetches suppressed.");
                 _tsLastPreviewFetch = DateTime.UtcNow;
             }
             catch (Exception ex)
@@ -804,6 +818,8 @@ public class SubframesPlugin : PluginBase, IPluginManifest, IPartImportsSatisfie
         _stationHeartbeatTask = null;
         _tsPreviewFloorTimerTask = null;
         _tsPreviewState = TsPreviewState.Idle;
+        // Clear the initial night plan so the next session starts with a fresh snapshot.
+        _initialNightPreview = null;
         // Do NOT null _currentTsPreview here - the cached preview is needed for
         // the Tonight's Plan post-dawn heartbeat even after imaging ends.
         _tsProfiles = Array.Empty<TsProfileInfo>();
@@ -1114,8 +1130,11 @@ public class SubframesPlugin : PluginBase, IPluginManifest, IPartImportsSatisfie
             TsProgressSnapshot  = tsSnapshot,
             TsProgressDelta     = tsDelta,
             TsAvailabilityState = _tsDetector?.CurrentState,
+            // Prefer the immutable initial night plan when it exists (accurate full
+            // schedule at session-start frame counts).  Fall back to _currentTsPreview
+            // for the pre-session one-shot case and post-dawn Idle_CachedPreview state.
             TsPreview           = (_tsDetector?.CurrentState == "active" || _tsPreviewState == TsPreviewState.Idle_CachedPreview)
-                ? _currentTsPreview : null,
+                ? (_initialNightPreview ?? _currentTsPreview) : null,
         };
     }
 
@@ -1130,6 +1149,11 @@ public class SubframesPlugin : PluginBase, IPluginManifest, IPartImportsSatisfie
     private void OnImageSavedTsPreviewCheck()
     {
         if (_tsPreviewState != TsPreviewState.Active) return;
+
+        // Once the initial night plan is cached at session start, mid-session re-fetches
+        // would return a degraded plan (targets near acquired >= desired drop out of the
+        // TS scheduler simulation). Skip them entirely.
+        if (_initialNightPreview is not null) return;
 
         var now = DateTime.UtcNow;
         if ((now - _tsLastPreviewFetch).TotalSeconds < 30) return;
@@ -1168,6 +1192,11 @@ public class SubframesPlugin : PluginBase, IPluginManifest, IPartImportsSatisfie
             while (await timer.WaitForNextTickAsync(ct).ConfigureAwait(false))
             {
                 if (_tsPreviewState != TsPreviewState.Active) continue;
+
+                // Once the initial night plan is cached, suppress floor-timer re-fetches.
+                // The initial plan never degrades mid-session; re-fetching would return
+                // fewer blocks as targets accumulate frames.
+                if (_initialNightPreview is not null) continue;
 
                 var idleSinceMinutes = (DateTime.UtcNow - _tsLastPreviewFetch).TotalMinutes;
                 if (idleSinceMinutes < 10) continue; // Image-driven fetch was recent enough.
