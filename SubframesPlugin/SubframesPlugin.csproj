@@ -8,7 +8,7 @@
     <PlatformTarget>x64</PlatformTarget>
     <AssemblyName>Subframes.NinaPlugin</AssemblyName>
     <RootNamespace>Subframes.NinaPlugin</RootNamespace>
-    <Version>0.4.2.6</Version>
+    <Version>0.4.2.7</Version>
     <!-- Ensure all NuGet dependency DLLs are copied to the build output dir.
          NINA's AssemblyResolve hook looks in the plugin subfolder, so all
          managed dependencies must be present there alongside the plugin DLL. -->
