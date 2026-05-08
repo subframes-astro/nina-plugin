@@ -849,10 +849,16 @@ public class SubframesPlugin : PluginBase, IPluginManifest, IPartImportsSatisfie
                     {
                         await FetchAndUpdateTsPreviewAsync(fetchCt).ConfigureAwait(false);
                         Logger.Info("[Subframes] One-shot TS preview fetch complete (pre-session).");
-                        // Send a single debounced heartbeat so the server gets the preview ASAP.
-                        // Using the centralised debounce avoids a double-fire when the startup
-                        // loop also sends its first heartbeat a few seconds later.
-                        TrySendStationHeartbeatDebounced("one-shot TS preview");
+                        // The preview heartbeat is the most valuable one (it carries
+                        // Tonight's Plan data).  If the debounce window would suppress
+                        // it (e.g. the startup-loop tick fired moments ago), wait it
+                        // out so we never silently drop the preview payload.
+                        if (!TrySendStationHeartbeatDebounced("one-shot TS preview"))
+                        {
+                            try { await Task.Delay(TimeSpan.FromSeconds(3), fetchCt).ConfigureAwait(false); }
+                            catch (OperationCanceledException) { return; }
+                            TrySendStationHeartbeatDebounced("one-shot TS preview (retry after debounce)");
+                        }
                     }
                     catch (Exception ex)
                     {
