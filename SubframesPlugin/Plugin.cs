@@ -339,7 +339,7 @@ public class SubframesPlugin : PluginBase, IPluginManifest, IPartImportsSatisfie
             await FetchAndUpdateTsPreviewAsync(CancellationToken.None).ConfigureAwait(false);
             if (_isPrimary && _options.IsEnabled)
             {
-                _ = _apiClient.SendStationHeartbeatAsync(BuildStationHeartbeatRequest(), CancellationToken.None);
+                TrySendStationHeartbeatDebounced("TS profile selected");
                 _sessionService.TriggerImmediateHeartbeatIfActive();
             }
         });
@@ -533,9 +533,7 @@ public class SubframesPlugin : PluginBase, IPluginManifest, IPartImportsSatisfie
 
             try
             {
-                Interlocked.Exchange(ref _lastStationHeartbeatSentTicks, DateTime.UtcNow.Ticks);
-                await _apiClient.SendStationHeartbeatAsync(BuildStationHeartbeatRequest(), CancellationToken.None);
-                Logger.Debug("[Subframes] Immediate station heartbeat triggered on session start.");
+                TrySendStationHeartbeatDebounced("session started");
             }
             catch (Exception ex)
             {
@@ -851,10 +849,10 @@ public class SubframesPlugin : PluginBase, IPluginManifest, IPartImportsSatisfie
                     {
                         await FetchAndUpdateTsPreviewAsync(fetchCt).ConfigureAwait(false);
                         Logger.Info("[Subframes] One-shot TS preview fetch complete (pre-session).");
-                        // Force an immediate heartbeat so the server gets the preview ASAP,
-                        // bypassing the normal 5-min periodic timer.
-                        Interlocked.Exchange(ref _lastStationHeartbeatSentTicks, DateTime.UtcNow.Ticks);
-                        _ = _apiClient.SendStationHeartbeatAsync(BuildStationHeartbeatRequest(), CancellationToken.None);
+                        // Send a single debounced heartbeat so the server gets the preview ASAP.
+                        // Using the centralised debounce avoids a double-fire when the startup
+                        // loop also sends its first heartbeat a few seconds later.
+                        TrySendStationHeartbeatDebounced("one-shot TS preview");
                     }
                     catch (Exception ex)
                     {
@@ -863,24 +861,46 @@ public class SubframesPlugin : PluginBase, IPluginManifest, IPartImportsSatisfie
                 });
             }
 
-            // Debounce: skip if a heartbeat was sent very recently to avoid a burst
-            // from rapid state flapping or an exact collision with the periodic timer.
-            var nowTicks = DateTime.UtcNow.Ticks;
-            var prevTicks = Interlocked.Read(ref _lastStationHeartbeatSentTicks);
-            if (nowTicks - prevTicks < TimeSpan.TicksPerSecond * 2)
-            {
-                Logger.Debug($"[Subframes] TS state → {newState}: immediate heartbeat suppressed (< 2 s since last send).");
-                return;
-            }
-
-            Interlocked.Exchange(ref _lastStationHeartbeatSentTicks, nowTicks);
-            Logger.Info($"[Subframes] TS state → {newState}: firing immediate station heartbeat.");
-            _ = _apiClient.SendStationHeartbeatAsync(BuildStationHeartbeatRequest(), CancellationToken.None);
+            TrySendStationHeartbeatDebounced($"TS state → {newState}");
         }
         catch (Exception ex)
         {
             Logger.Warning($"[Subframes] OnTsStateChanged: immediate station heartbeat failed: {ex.Message}");
         }
+    }
+
+    /// <summary>
+    /// Sends a station heartbeat only if no heartbeat was sent within the last 2 seconds.
+    /// Returns <c>true</c> when the heartbeat was fired, <c>false</c> when suppressed.
+    /// <para>
+    /// All out-of-cycle heartbeat sites (event handlers, one-shot callbacks) MUST call
+    /// this instead of invoking <c>_apiClient.SendStationHeartbeatAsync</c> directly so
+    /// startup bursts are deduplicated from a single place.
+    /// </para>
+    /// <para>
+    /// The periodic 300-second loop may still call <c>SendStationHeartbeatAsync</c> directly
+    /// (no burst risk at that cadence) but must keep <c>_lastStationHeartbeatSentTicks</c>
+    /// up-to-date so the debounce window remains accurate.
+    /// </para>
+    /// </summary>
+    private bool TrySendStationHeartbeatDebounced(string? reason = null)
+    {
+        var nowTicks = DateTime.UtcNow.Ticks;
+        var prevTicks = Interlocked.Read(ref _lastStationHeartbeatSentTicks);
+        if (nowTicks - prevTicks < TimeSpan.TicksPerSecond * 2)
+        {
+            Logger.Debug(
+                $"[Subframes] Station heartbeat suppressed (< 2 s since last send)"
+                + (reason is null ? "." : $" [{reason}]."));
+            return false;
+        }
+
+        Interlocked.Exchange(ref _lastStationHeartbeatSentTicks, nowTicks);
+        Logger.Info(
+            $"[Subframes] Firing station heartbeat"
+            + (reason is null ? "." : $" [{reason}]."));
+        _ = _apiClient.SendStationHeartbeatAsync(BuildStationHeartbeatRequest(), CancellationToken.None);
+        return true;
     }
 
     private async Task RunStationHeartbeatLoopAsync(CancellationToken ct)
@@ -919,8 +939,9 @@ public class SubframesPlugin : PluginBase, IPluginManifest, IPartImportsSatisfie
         // this wait entirely.
 
         // First heartbeat - TS state should now be accurate.
-        Interlocked.Exchange(ref _lastStationHeartbeatSentTicks, DateTime.UtcNow.Ticks);
-        _ = _apiClient.SendStationHeartbeatAsync(BuildStationHeartbeatRequest(), CancellationToken.None);
+        // Use the centralised debounce so this is suppressed when OnTsStateChanged already
+        // fired a heartbeat during the 5 s + 3 s grace window above.
+        TrySendStationHeartbeatDebounced("startup loop first tick");
 
         using var timer = new PeriodicTimer(TimeSpan.FromSeconds(300));
         try
@@ -1115,7 +1136,9 @@ public class SubframesPlugin : PluginBase, IPluginManifest, IPartImportsSatisfie
         {
             try
             {
-                await FetchAndUpdateTsPreviewAsync(cts.Token).ConfigureAwait(false);
+                var previewChanged = await FetchAndUpdateTsPreviewAsync(cts.Token).ConfigureAwait(false);
+                if (previewChanged)
+                    TrySendStationHeartbeatDebounced("image-saved preview update");
             }
             catch (OperationCanceledException) { /* Normal shutdown */ }
             catch (Exception ex)
@@ -1144,8 +1167,10 @@ public class SubframesPlugin : PluginBase, IPluginManifest, IPartImportsSatisfie
                 if (idleSinceMinutes < 10) continue; // Image-driven fetch was recent enough.
 
                 Logger.Debug("[Subframes] TS preview floor timer: no recent image-driven fetch, polling once.");
-                await FetchAndUpdateTsPreviewAsync(ct).ConfigureAwait(false);
+                var previewChanged = await FetchAndUpdateTsPreviewAsync(ct).ConfigureAwait(false);
                 _tsLastPreviewFetch = DateTime.UtcNow;
+                if (previewChanged)
+                    TrySendStationHeartbeatDebounced("preview floor timer");
             }
         }
         catch (OperationCanceledException)
@@ -1158,7 +1183,13 @@ public class SubframesPlugin : PluginBase, IPluginManifest, IPartImportsSatisfie
         }
     }
 
-    private async Task FetchAndUpdateTsPreviewAsync(CancellationToken ct)
+    /// <summary>
+    /// Returns <c>true</c> when the TS preview block count increased (and is non-zero),
+    /// signalling to callers that sending a station heartbeat is worthwhile.
+    /// Callers are responsible for deciding whether and how to send the heartbeat;
+    /// this method no longer fires one internally.
+    /// </summary>
+    private async Task<bool> FetchAndUpdateTsPreviewAsync(CancellationToken ct)
     {
         if (_tsDetector?.CurrentState != "active" || _tsPreviewClient is null)
         {
@@ -1204,9 +1235,11 @@ public class SubframesPlugin : PluginBase, IPluginManifest, IPartImportsSatisfie
             var newBlockCount = _currentTsPreview?.Blocks?.Count ?? 0;
             if (newBlockCount != previousBlockCount && newBlockCount > 0)
             {
-                // Preview changed - push an immediate heartbeat so the dashboard
-                // reflects the update within ~60 s instead of waiting up to 300 s.
-                _ = _apiClient.SendStationHeartbeatAsync(BuildStationHeartbeatRequest(), CancellationToken.None);
+                // Preview changed - return true so the caller can push an immediate
+                // heartbeat via TrySendStationHeartbeatDebounced(). We no longer fire
+                // one here to avoid double-fires when the caller is already about to
+                // send its own heartbeat.
+                return true;
             }
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
@@ -1218,6 +1251,8 @@ public class SubframesPlugin : PluginBase, IPluginManifest, IPartImportsSatisfie
             Logger.Debug($"[Subframes] FetchAndUpdateTsPreviewAsync error: {ex.Message}");
             _currentTsPreview = null;
         }
+
+        return false;
     }
 
     private List<DeviceDto> BuildDevices()
