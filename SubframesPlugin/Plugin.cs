@@ -1105,7 +1105,7 @@ public class SubframesPlugin : PluginBase, IPluginManifest, IPartImportsSatisfie
             Logger.Debug($"[Subframes] Station heartbeat: TS progress skipped ({ex.GetType().Name}: {ex.Message})");
         }
 
-        return new StationHeartbeatRequest
+        var request = new StationHeartbeatRequest
         {
             InstanceId          = string.IsNullOrWhiteSpace(_options.InstanceId) ? null : _options.InstanceId,
             InstanceName        = string.IsNullOrWhiteSpace(_options.InstanceName) ? null : _options.InstanceName,
@@ -1120,6 +1120,19 @@ public class SubframesPlugin : PluginBase, IPluginManifest, IPartImportsSatisfie
             TsPreview           = (_tsDetector?.CurrentState == "active" || _tsPreviewState == TsPreviewState.Idle_CachedPreview)
                 ? _currentTsPreview : null,
         };
+
+        // Log what we're about to send so we can trace data loss between
+        // TS fetch and backend ingest.
+        var hbBlockCount = request.TsPreview?.Blocks?.Count ?? 0;
+        var hbTargetNames = request.TsPreview?.Blocks?
+            .Where(b => !b.WaitPeriod)
+            .Select(b => $"'{b.TargetName}' {b.StartTime}->{b.EndTime}")
+            .ToList();
+        Logger.Debug($"[Subframes] BuildStationHeartbeatRequest: TsPreview={request.TsPreview != null}, blocks={hbBlockCount}, tsDetector={_tsDetector?.CurrentState}, previewState={_tsPreviewState}");
+        if (hbTargetNames is { Count: > 0 })
+            Logger.Debug($"[Subframes] BuildStationHeartbeatRequest targets: {string.Join("; ", hbTargetNames)}");
+
+        return request;
     }
 
     // ── TS Preview state machine ────────────────────────────────────────────
