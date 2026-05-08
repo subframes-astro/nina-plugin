@@ -77,9 +77,6 @@ public class SubframesPlugin : PluginBase, IPluginManifest, IPartImportsSatisfie
     // UTC ticks of the most recent station heartbeat send; used to debounce rapid
     // event-driven sends (e.g. TS state flapping or collision with the periodic timer).
     private long _lastStationHeartbeatSentTicks;
-    // Set to true when the first Start Session command executes.
-    // TS progress queries are suppressed until then.
-    private volatile bool _sessionEverStarted;
     private TargetSchedulerDetector? _tsDetector;
     private TsPreviewClient? _tsPreviewClient;
     private volatile TsPreviewDto? _currentTsPreview; // Written from preview fetches; read from BuildStationHeartbeatRequest
@@ -496,7 +493,6 @@ public class SubframesPlugin : PluginBase, IPluginManifest, IPartImportsSatisfie
     /// </summary>
     private void OnSessionStarted(object? sender, EventArgs e)
     {
-        _sessionEverStarted = true;
         _tsPreviewState = TsPreviewState.Active;
         _tsPreviewStartupTime = DateTime.UtcNow;
         _tsLastPreviewFetch = DateTime.UtcNow;
@@ -1089,27 +1085,24 @@ public class SubframesPlugin : PluginBase, IPluginManifest, IPartImportsSatisfie
         catch { /* safety monitor not available */ }
 
         // Include TS progress: full snapshot on first beat, delta on subsequent beats.
-        // Suppressed until the user has run Start Session at least once this NINA session.
+        // Reads directly from the TS SQLite DB — available from plugin startup, no session required.
         TsProgressSnapshotDto? tsSnapshot = null;
         TsProgressDeltaDto? tsDelta = null;
-        if (_sessionEverStarted)
+        try
         {
-            try
+            if (_tsFirstBeat)
             {
-                if (_tsFirstBeat)
-                {
-                    tsSnapshot = TsProgressReader.ReadProgressSnapshot();
-                    _tsFirstBeat = false;
-                }
-                else
-                {
-                    tsDelta = TsProgressReader.ReadProgressDelta();
-                }
+                tsSnapshot = TsProgressReader.ReadProgressSnapshot();
+                _tsFirstBeat = false;
             }
-            catch (Exception ex)
+            else
             {
-                Logger.Debug($"[Subframes] Station heartbeat: TS progress skipped ({ex.GetType().Name}: {ex.Message})");
+                tsDelta = TsProgressReader.ReadProgressDelta();
             }
+        }
+        catch (Exception ex)
+        {
+            Logger.Debug($"[Subframes] Station heartbeat: TS progress skipped ({ex.GetType().Name}: {ex.Message})");
         }
 
         return new StationHeartbeatRequest
