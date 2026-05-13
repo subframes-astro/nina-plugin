@@ -847,9 +847,12 @@ public class SubframesPlugin : PluginBase, IPluginManifest, IPartImportsSatisfie
             // This is the only place this fetch is triggered from Idle - the Active state
             // is already handled by OnImageSavedTsPreviewCheck and RunTsPreviewFloorTimerAsync.
             //
-            // We delay 120 seconds before fetching because TS needs time after its API
-            // comes online to fully compute the schedule for all targets.  Fetching
-            // immediately returns an incomplete plan (e.g. 1-2 blocks instead of 6+).
+            // TS needs time after its API comes online to fully compute the schedule
+            // for all targets.  A single fixed delay is insufficient (varies by machine
+            // and target count).  We use a stabilization approach: fetch periodically
+            // and accept the result only when two consecutive fetches return the same
+            // number of target blocks (indicating TS has finished computing).
+            // Total worst-case wait: ~7 minutes (120s initial + up to 5×60s polls).
             if (newState == "active"
                 && _tsPreviewState == TsPreviewState.Idle
                 && _currentTsPreview is null)
@@ -859,12 +862,48 @@ public class SubframesPlugin : PluginBase, IPluginManifest, IPartImportsSatisfie
                 {
                     try
                     {
-                        Logger.Info("[Subframes] One-shot TS preview: waiting 120 s for TS to compute full schedule.");
-                        await Task.Delay(TimeSpan.FromSeconds(120), fetchCt).ConfigureAwait(false);
+                        // Stabilization approach: TS may return partial results (e.g. 1
+                        // target before computing the rest).  We fetch periodically and
+                        // accept the result only when two consecutive fetches return the
+                        // same target block count — indicating TS has stabilized.
+                        const int initialDelaySeconds = 120;
+                        const int pollIntervalSeconds = 60;
+                        const int maxPolls = 5; // After initial delay: up to 5×60s = 5 more min
+
+                        Logger.Info($"[Subframes] One-shot TS preview: waiting {initialDelaySeconds} s for TS to begin computing schedule.");
+                        await Task.Delay(TimeSpan.FromSeconds(initialDelaySeconds), fetchCt).ConfigureAwait(false);
 
                         await FetchAndUpdateTsPreviewAsync(fetchCt).ConfigureAwait(false);
+                        var previousTargetCount = _currentTsPreview?.Blocks?
+                            .Count(b => !b.WaitPeriod && b.ExposurePlans is { Count: > 0 }) ?? 0;
+                        Logger.Info($"[Subframes] One-shot TS preview initial fetch: {previousTargetCount} target block(s) with exposure plans.");
+
+                        // Poll until stabilized (two consecutive fetches with same count)
+                        // or we exhaust retries.
+                        for (int poll = 0; poll < maxPolls; poll++)
+                        {
+                            Logger.Info($"[Subframes] One-shot TS preview: waiting {pollIntervalSeconds} s for stabilization check (poll {poll + 1}/{maxPolls}).");
+                            await Task.Delay(TimeSpan.FromSeconds(pollIntervalSeconds), fetchCt).ConfigureAwait(false);
+
+                            await FetchAndUpdateTsPreviewAsync(fetchCt).ConfigureAwait(false);
+                            var currentTargetCount = _currentTsPreview?.Blocks?
+                                .Count(b => !b.WaitPeriod && b.ExposurePlans is { Count: > 0 }) ?? 0;
+
+                            Logger.Info($"[Subframes] One-shot TS preview poll {poll + 1}: {currentTargetCount} target block(s) (previous: {previousTargetCount}).");
+
+                            if (currentTargetCount > 0 && currentTargetCount == previousTargetCount)
+                            {
+                                Logger.Info("[Subframes] One-shot TS preview: schedule stabilized.");
+                                break;
+                            }
+
+                            previousTargetCount = currentTargetCount;
+                        }
+
+                        var totalTargetBlocks = _currentTsPreview?.Blocks?
+                            .Count(b => !b.WaitPeriod && b.ExposurePlans is { Count: > 0 }) ?? 0;
                         var blockCount = _currentTsPreview?.Blocks?.Count ?? 0;
-                        Logger.Info($"[Subframes] One-shot TS preview fetch complete (pre-session, {blockCount} blocks).");
+                        Logger.Info($"[Subframes] One-shot TS preview fetch complete (pre-session, {blockCount} blocks, {totalTargetBlocks} targets with plans).");
 
                         // Cache as initial night preview if not already set by OnSessionStarted.
                         if (_initialNightPreview is null && _currentTsPreview is { Blocks.Count: > 0 })
