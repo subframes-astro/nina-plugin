@@ -866,7 +866,7 @@ public sealed class SessionService : IDisposable, IFocuserConsumer, IGuiderConsu
             var rawTarget = e.MetaData?.Target?.Name;
             if (!string.IsNullOrWhiteSpace(rawTarget))
             {
-                var targetRa = e.MetaData?.Target?.Coordinates?.RA ?? 0.0;
+                var targetRa = (e.MetaData?.Target?.Coordinates?.RA ?? 0.0) * 15.0;
                 var targetDec = e.MetaData?.Target?.Coordinates?.Dec ?? 0.0;
                 _ = OnTargetDetectedAsync(rawTarget, targetRa, targetDec);
             }
@@ -1129,7 +1129,7 @@ public sealed class SessionService : IDisposable, IFocuserConsumer, IGuiderConsu
             var request = new StartSessionRequest
             {
                 TargetName           = targetName,
-                TargetRa             = e.MetaData?.Target?.Coordinates?.RA ?? 0.0,
+                TargetRa             = (e.MetaData?.Target?.Coordinates?.RA ?? 0.0) * 15.0,
                 TargetDec            = e.MetaData?.Target?.Coordinates?.Dec ?? 0.0,
                 StartTime            = DateTime.UtcNow.ToString("o"),
                 InstanceId           = string.IsNullOrWhiteSpace(options.InstanceId) ? null : options.InstanceId,

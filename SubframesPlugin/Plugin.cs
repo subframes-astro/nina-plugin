@@ -673,8 +673,9 @@ public class SubframesPlugin : PluginBase, IPluginManifest, IPartImportsSatisfie
                 var ct = coords.GetType();
                 var ra  = ct.GetProperty("RA")?.GetValue(coords);
                 var dec = ct.GetProperty("Dec")?.GetValue(coords);
+                // Coordinates.RA is in hours (0–24); convert to degrees (0–360) for the API.
                 if (ra is double r && dec is double d)
-                    return (r, d);
+                    return (r * 15.0, d);
             }
         }
         catch { /* fall through */ }
@@ -691,8 +692,9 @@ public class SubframesPlugin : PluginBase, IPluginManifest, IPartImportsSatisfie
             var ct = coords.GetType();
             var ra  = ct.GetProperty("RA")?.GetValue(coords);
             var dec = ct.GetProperty("Dec")?.GetValue(coords);
+            // Coordinates.RA is in hours (0–24); convert to degrees (0–360) for the API.
             if (ra is double r && dec is double d)
-                return (r, d);
+                return (r * 15.0, d);
         }
         catch { /* best effort */ }
 

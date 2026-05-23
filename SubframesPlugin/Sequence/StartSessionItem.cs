@@ -292,9 +292,10 @@ public partial class StartSessionItem : SequenceItem, IValidatable
             if (coords is not null)
             {
                 var ct = coords.GetType();
+                // Coordinates.RA is in hours (0–24); convert to degrees (0–360) for the API.
                 if (ct.GetProperty("RA")?.GetValue(coords) is double r
                     && ct.GetProperty("Dec")?.GetValue(coords) is double d)
-                    return (r, d);
+                    return (r * 15.0, d);
             }
         }
         catch { /* fall through */ }
@@ -308,9 +309,10 @@ public partial class StartSessionItem : SequenceItem, IValidatable
             var coords = inputCoords.GetType().GetProperty("Coordinates")?.GetValue(inputCoords);
             if (coords is null) return (0, 0);
             var ct = coords.GetType();
+            // Coordinates.RA is in hours (0–24); convert to degrees (0–360) for the API.
             if (ct.GetProperty("RA")?.GetValue(coords) is double r
                 && ct.GetProperty("Dec")?.GetValue(coords) is double d)
-                return (r, d);
+                return (r * 15.0, d);
         }
         catch { /* best effort */ }
 
