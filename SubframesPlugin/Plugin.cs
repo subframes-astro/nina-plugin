@@ -347,6 +347,15 @@ public class SubframesPlugin : PluginBase, IPluginManifest, IPartImportsSatisfie
     {
         if (_isPrimary)
         {
+            // Always end any active session on shutdown, regardless of safety state.
+            // This is the safety net for sessions kept alive during unsafe periods.
+            if (_sessionService.HasActiveSession)
+            {
+                Logger.Info("[Subframes] Teardown: ending active session before plugin unload.");
+                try { await _sessionService.EndSessionAsync(CancellationToken.None); }
+                catch (Exception ex) { Logger.Warning($"[Subframes] Teardown EndSession failed: {ex.Message}"); }
+            }
+
             _sequenceRetrySubscribeCts?.Cancel();
             _sequenceRetrySubscribeCts?.Dispose();
             _sequenceRetrySubscribeCts = null;
@@ -468,12 +477,29 @@ public class SubframesPlugin : PluginBase, IPluginManifest, IPartImportsSatisfie
     /// Called by NINA when the advanced sequence finishes - whether it completed
     /// normally, was cancelled by the user, or failed.  Closes any open session
     /// so the website reflects the actual end of the imaging run.
+    ///
+    /// Exception: when the safety monitor reports unsafe, some sequence architectures
+    /// (e.g. WhenUnsafe trigger from the When Plugin) restart the Advanced Sequence,
+    /// causing this handler to fire even though imaging will resume after recovery.
+    /// In that case we keep the session alive — heartbeats continue with isSafe=false
+    /// and post-recovery frames are attributed to the same session, matching the
+    /// behavior of sequences that use SafetyMonitorCondition + WaitUntilSafe.
     /// </summary>
     private Task OnSequenceFinished(object sender, EventArgs e)
     {
         UnsubscribeFromContainerEvents();
         if (_sessionService.HasActiveSession)
         {
+            // If the safety monitor currently reports unsafe, this is likely a
+            // WhenUnsafe-triggered sequence restart — not a true end of imaging.
+            // Keep the session alive so post-recovery frames are captured.
+            if (_sessionService.LastKnownIsSafe == false)
+            {
+                Logger.Info("[Subframes] Sequence ended while safety monitor reports unsafe — " +
+                            "keeping session alive for post-recovery continuity.");
+                return Task.CompletedTask;
+            }
+
             Logger.Info("[Subframes] Sequence run ended - closing active session.");
             // Preserve the cached preview for the Tonight's Plan post-dawn heartbeat.
             if (_tsPreviewState == TsPreviewState.Active || _tsPreviewState == TsPreviewState.Startup)
