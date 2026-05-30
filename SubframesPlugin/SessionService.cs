@@ -313,6 +313,12 @@ public sealed class SessionService : IDisposable, IFocuserConsumer, IGuiderConsu
     public bool HasActiveSession => _activeSessionId is not null;
 
     /// <summary>
+    /// Returns the last known safety state: true = safe, false = unsafe, null = unknown.
+    /// Used by the plugin to suppress session-end on safety-triggered sequence restarts.
+    /// </summary>
+    public bool? LastKnownIsSafe => _lastIsSafeState switch { 1 => true, 0 => false, _ => null };
+
+    /// <summary>
     /// Call this from the StartSessionItem sequence item.
     /// POSTs to /api/v1/ingest/session/start and stores the returned ID.
     /// </summary>
