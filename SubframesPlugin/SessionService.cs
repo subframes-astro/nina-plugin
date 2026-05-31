@@ -436,6 +436,7 @@ public sealed class SessionService : IDisposable, IFocuserConsumer, IGuiderConsu
         _activeLocalSessionId  = null;
         _activeSessionTargetId = null;
         _activeLocalTargetId   = null;
+        _isManualSession       = false;
         _sessionStatus = "active";
         await _apiClient.EndSessionAsync(sessionId, skipped, failed, ct);
 
