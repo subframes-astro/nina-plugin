@@ -1586,6 +1586,12 @@ public sealed class SessionService : IDisposable, IFocuserConsumer, IGuiderConsu
                 Metadata  = new Dictionary<string, object?> { ["isSafe"] = nowSafe },
             });
             Logger.Debug($"[Subframes] {eventType} event queued: session={sessionId} isSafe={nowSafe}");
+
+            // Reset the inactivity timer on every safety transition.
+            // Without this, a long unsafe period (no frames captured) causes the
+            // 30-minute idle timeout to fire while the system is still unsafe or
+            // has just recovered, killing the session before imaging can resume.
+            _lastFrameTime = DateTime.UtcNow;
         }
         catch (Exception ex)
         {
