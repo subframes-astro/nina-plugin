@@ -3,6 +3,7 @@ using NINA.Core.Model;
 using NINA.Core.Utility;
 using NINA.Sequencer.SequenceItem;
 using NINA.Sequencer.Validations;
+using Subframes.NinaPlugin;
 
 namespace Subframes.NinaPlugin.Sequence;
 
@@ -47,14 +48,14 @@ public sealed class EndSessionItem : SequenceItem, IValidatable
 
         if (!_sessionService.HasActiveSession)
         {
-            Logger.Warning("[Subframes] EndSessionItem: no active session to end.");
+            SubframesLogger.Warning("EndSessionItem: no active session to end.");
             progress.Report(new ApplicationStatus { Status = "Subframes: no active session." });
             return;
         }
 
         await _sessionService.EndSessionAsync(ct);
 
-        Logger.Info("[Subframes] EndSessionItem complete — session ended.");
+        SubframesLogger.Info("EndSessionItem complete — session ended.");
         progress.Report(new ApplicationStatus { Status = "Subframes: session ended." });
     }
 

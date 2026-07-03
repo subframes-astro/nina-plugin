@@ -1,6 +1,7 @@
 using System.Text.Json;
 using NINA.Core.Utility;
 using Subframes.NinaPlugin.Api;
+using Subframes.NinaPlugin;
 
 namespace Subframes.NinaPlugin.Data;
 
@@ -80,14 +81,14 @@ public sealed class CacheReplayEngine : IDisposable
     public void PauseForLiveSession()
     {
         _paused = true;
-        Logger.Info("[Subframes] CacheReplayEngine: paused for live session.");
+        SubframesLogger.Info("CacheReplayEngine: paused for live session.");
     }
 
     /// <summary>Resume replay after the live session ended.</summary>
     public void ResumeAfterLiveSession()
     {
         _paused = false;
-        Logger.Info("[Subframes] CacheReplayEngine: resumed after live session.");
+        SubframesLogger.Info("CacheReplayEngine: resumed after live session.");
     }
 
     /// <summary>Start the background replay loop (no-op if already running).</summary>
@@ -98,7 +99,7 @@ public sealed class CacheReplayEngine : IDisposable
         var cts = new CancellationTokenSource();
         _cts = cts;
         _replayTask = RunReplayLoopAsync(cts.Token);
-        Logger.Info("[Subframes] CacheReplayEngine started.");
+        SubframesLogger.Info("CacheReplayEngine started.");
     }
 
     /// <summary>Stop the background replay loop.</summary>
@@ -130,7 +131,7 @@ public sealed class CacheReplayEngine : IDisposable
         catch (OperationCanceledException) { }
         catch (Exception ex)
         {
-            Logger.Error($"[Subframes] CacheReplayEngine loop terminated: {ex.Message}");
+            SubframesLogger.Error($"CacheReplayEngine loop terminated: {ex.Message}");
         }
     }
 
@@ -148,7 +149,7 @@ public sealed class CacheReplayEngine : IDisposable
         _sessionsTotal = sessions.Count;
         _sessionsDone  = 0;
 
-        Logger.Info($"[Subframes] CacheReplayEngine: {sessions.Count} session(s) pending replay.");
+        SubframesLogger.Info($"CacheReplayEngine: {sessions.Count} session(s) pending replay.");
 
         for (int i = 0; i < sessions.Count; i++)
         {
@@ -192,7 +193,7 @@ public sealed class CacheReplayEngine : IDisposable
     /// </summary>
     private async Task ReplaySessionAsync(CachedSessionRecord session, CancellationToken ct)
     {
-        Logger.Info($"[Subframes] Replaying session local={session.LocalId} ack={session.ServerAck}");
+        SubframesLogger.Info($"Replaying session local={session.LocalId} ack={session.ServerAck}");
 
         // 1. Start session on server if not yet acked.
         string serverId;
@@ -201,7 +202,7 @@ public sealed class CacheReplayEngine : IDisposable
             var startRequest = DeserializeOrNull<StartSessionRequest>(session.StartJson);
             if (startRequest is null)
             {
-                Logger.Warning($"[Subframes] Replay: corrupt StartSession JSON for local={session.LocalId} — skipping.");
+                SubframesLogger.Warning($"Replay: corrupt StartSession JSON for local={session.LocalId} — skipping.");
                 _cache.MarkSessionReplayed(session.LocalId);
                 return;
             }
@@ -214,13 +215,13 @@ public sealed class CacheReplayEngine : IDisposable
 
             if (newServerId is null)
             {
-                Logger.Warning($"[Subframes] Replay: StartSession failed for local={session.LocalId} — will retry next pass.");
+                SubframesLogger.Warning($"Replay: StartSession failed for local={session.LocalId} — will retry next pass.");
                 return;
             }
 
             _cache.MarkSessionAcked(session.LocalId, newServerId);
             serverId = newServerId;
-            Logger.Info($"[Subframes] Replay: session started server={serverId}");
+            SubframesLogger.Info($"Replay: session started server={serverId}");
         }
         else
         {
@@ -307,7 +308,7 @@ public sealed class CacheReplayEngine : IDisposable
                 catch (Exception ex)
                 {
                     _cache.MarkFailed(frameIds, ex.Message);
-                    Logger.Warning($"[Subframes] Replay IngestFrames failed: {ex.Message}");
+                    SubframesLogger.Warning($"Replay IngestFrames failed: {ex.Message}");
                     backoff = true;
                 }
 
@@ -320,7 +321,7 @@ public sealed class CacheReplayEngine : IDisposable
             }
         }
 
-        Logger.Info($"[Subframes] Replay: {framesDone} frame(s) uploaded for session={serverId}");
+        SubframesLogger.Info($"Replay: {framesDone} frame(s) uploaded for session={serverId}");
 
         // 4. Replay cached events.
         var events = _cache.GetPendingEventsForSession(session.LocalId);
@@ -359,7 +360,7 @@ public sealed class CacheReplayEngine : IDisposable
 
         // 6. Mark session fully synced.
         _cache.MarkSessionReplayed(session.LocalId);
-        Logger.Info($"[Subframes] Replay complete for session={serverId}");
+        SubframesLogger.Info($"Replay complete for session={serverId}");
     }
 
     // ── Token bucket rate limiter ────────────────────────────────────────────
@@ -405,10 +406,10 @@ public sealed class CacheReplayEngine : IDisposable
     {
         var normal = _options.ReplayRateReqPerSec > 0 ? (double)_options.ReplayRateReqPerSec : 10.0;
         _currentRefillRate = normal / 2.0;
-        Logger.Info($"[Subframes] Replay: rate halved to {_currentRefillRate:F1} req/s after error. Restoring in 60 s.");
+        SubframesLogger.Info($"Replay: rate halved to {_currentRefillRate:F1} req/s after error. Restoring in 60 s.");
         await Task.Delay(TimeSpan.FromSeconds(60));
         _currentRefillRate = normal;
-        Logger.Info($"[Subframes] Replay: refill rate restored to {_currentRefillRate:F1} req/s.");
+        SubframesLogger.Info($"Replay: refill rate restored to {_currentRefillRate:F1} req/s.");
     }
 
     // ── Helpers ──────────────────────────────────────────────────────────────

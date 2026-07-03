@@ -25,18 +25,18 @@ internal static class TsPlannedTargetReader
             var dbPath = TsHelper.GetTsDbPath();
             if (dbPath is null || !File.Exists(dbPath))
             {
-                Logger.Info($"[Subframes] Target Scheduler not detected (no database at {dbPath})");
+                SubframesLogger.Info($"Target Scheduler not detected (no database at {dbPath})");
                 return null;
             }
 
-            Logger.Info($"[Subframes] Target Scheduler database found at {dbPath}");
+            SubframesLogger.Info($"Target Scheduler database found at {dbPath}");
             var targets = QueryTargets(dbPath);
-            Logger.Info($"[Subframes] TS planned targets: found {targets.Count} target(s).");
+            SubframesLogger.Info($"TS planned targets: found {targets.Count} target(s).");
             return targets.Count > 0 ? targets : null;
         }
         catch (Exception ex)
         {
-            Logger.Warning($"[Subframes] TS planned targets: read failed ({ex.GetType().Name}: {ex.Message})");
+            SubframesLogger.Warning($"TS planned targets: read failed ({ex.GetType().Name}: {ex.Message})");
             return null;
         }
     }

@@ -60,14 +60,14 @@ internal sealed class TargetSchedulerDetector : IDisposable
         if (!IsAssemblyPresent())
         {
             _currentState = "none";
-            Logger.Debug("[Subframes] TargetSchedulerDetector: TS not found — state=none.");
+            SubframesLogger.Debug("TargetSchedulerDetector: TS not found — state=none.");
             return;
         }
 
         // TS is installed — set "no_api" immediately so the first heartbeat
         // never reports "none" while the async probe is still in-flight.
         _currentState = "no_api";
-        Logger.Debug("[Subframes] TargetSchedulerDetector: TS assembly found — starting HTTP probe loop.");
+        SubframesLogger.Debug("TargetSchedulerDetector: TS assembly found — starting HTTP probe loop.");
         var cts = new CancellationTokenSource();
         _cts = cts;
         _probeLoopTask = RunProbeLoopAsync(cts.Token);
@@ -114,7 +114,7 @@ internal sealed class TargetSchedulerDetector : IDisposable
         }
         catch (Exception ex)
         {
-            Logger.Debug($"[Subframes] TargetSchedulerDetector: filesystem check error: {ex.Message}");
+            SubframesLogger.Debug($"TargetSchedulerDetector: filesystem check error: {ex.Message}");
         }
 
         // Database fallback: if the TS database file exists, TS is installed.
@@ -126,7 +126,7 @@ internal sealed class TargetSchedulerDetector : IDisposable
         }
         catch (Exception ex)
         {
-            Logger.Debug($"[Subframes] TargetSchedulerDetector: DB path check error: {ex.Message}");
+            SubframesLogger.Debug($"TargetSchedulerDetector: DB path check error: {ex.Message}");
         }
 
         return false;
@@ -149,7 +149,7 @@ internal sealed class TargetSchedulerDetector : IDisposable
         }
         catch (Exception ex)
         {
-            Logger.Error($"[Subframes] TargetSchedulerDetector: probe loop terminated unexpectedly: {ex.Message}");
+            SubframesLogger.Error($"TargetSchedulerDetector: probe loop terminated unexpectedly: {ex.Message}");
         }
     }
 
@@ -174,10 +174,10 @@ internal sealed class TargetSchedulerDetector : IDisposable
 
         if (_currentState != newState)
         {
-            Logger.Info($"[Subframes] TargetSchedulerDetector: state {_currentState} → {newState}");
+            SubframesLogger.Info($"TargetSchedulerDetector: state {_currentState} → {newState}");
             _currentState = newState;
             try { StateChanged?.Invoke(this, newState); }
-            catch (Exception ex) { Logger.Debug($"[Subframes] TargetSchedulerDetector: StateChanged handler threw: {ex.Message}"); }
+            catch (Exception ex) { SubframesLogger.Debug($"TargetSchedulerDetector: StateChanged handler threw: {ex.Message}"); }
         }
     }
 }

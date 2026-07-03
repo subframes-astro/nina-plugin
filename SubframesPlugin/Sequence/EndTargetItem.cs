@@ -3,6 +3,7 @@ using NINA.Core.Model;
 using NINA.Core.Utility;
 using NINA.Sequencer.SequenceItem;
 using NINA.Sequencer.Validations;
+using Subframes.NinaPlugin;
 
 namespace Subframes.NinaPlugin.Sequence;
 
@@ -45,7 +46,7 @@ public sealed class EndTargetItem : SequenceItem, IValidatable
     {
         if (_sessionService.ActiveSessionTargetId is null)
         {
-            Logger.Debug("[Subframes] EndTargetItem: no active target — skipping.");
+            SubframesLogger.Debug("EndTargetItem: no active target — skipping.");
             return;
         }
 
@@ -56,7 +57,7 @@ public sealed class EndTargetItem : SequenceItem, IValidatable
 
         await _sessionService.EndTargetAsync(ct);
 
-        Logger.Info("[Subframes] EndTargetItem complete.");
+        SubframesLogger.Info("EndTargetItem complete.");
         progress.Report(new ApplicationStatus
         {
             Status = "Subframes: target ended."

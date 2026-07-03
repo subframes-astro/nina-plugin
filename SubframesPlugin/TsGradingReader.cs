@@ -27,17 +27,17 @@ internal static class TsGradingReader
             var dbPath = TsHelper.GetTsDbPath();
             if (dbPath is null || !File.Exists(dbPath))
             {
-                Logger.Info($"[Subframes] Target Scheduler not detected (no database at {dbPath})");
+                SubframesLogger.Info($"Target Scheduler not detected (no database at {dbPath})");
                 return null;
             }
 
             var entries = QueryGradingEntries(dbPath, sessionStart, sessionEnd);
-            Logger.Info($"[Subframes] TS grading: found {entries.Count} entry/entries in session window.");
+            SubframesLogger.Info($"TS grading: found {entries.Count} entry/entries in session window.");
             return entries.Count > 0 ? entries : null;
         }
         catch (Exception ex)
         {
-            Logger.Warning($"[Subframes] TS grading: read skipped ({ex.GetType().Name}: {ex.Message})");
+            SubframesLogger.Warning($"TS grading: read skipped ({ex.GetType().Name}: {ex.Message})");
             return null;
         }
     }
@@ -61,7 +61,7 @@ internal static class TsGradingReader
         var format = DetectDateFormat(conn);
         if (format == DateFormat.Unknown)
         {
-            Logger.Info("[Subframes] TS grading: no rows in acquiredimage — nothing to query.");
+            SubframesLogger.Info("TS grading: no rows in acquiredimage — nothing to query.");
             return [];
         }
 
@@ -128,7 +128,7 @@ internal static class TsGradingReader
             return DateFormat.Unknown;
 
         var value = Convert.ToInt64(sample);
-        Logger.Info($"[Subframes] TS grading: acquireddate sample value = {value}");
+        SubframesLogger.Info($"TS grading: acquireddate sample value = {value}");
 
         // .NET ticks for year 2000 ≈ 630,822,816,000,000,000 (10^17 order)
         // Unix epoch seconds for year 2000 ≈ 946,684,800 (10^9 order)

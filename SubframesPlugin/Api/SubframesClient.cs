@@ -4,6 +4,7 @@ using System.Net.Http.Json;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using NINA.Core.Utility;
+using Subframes.NinaPlugin;
 
 namespace Subframes.NinaPlugin.Api;
 
@@ -56,11 +57,11 @@ public sealed class SubframesClient : IDisposable
                     new AuthenticationHeaderValue("Bearer", key);
 
                 var preview = key.Length > 12 ? key[..12] + "..." : "(short key)";
-                Logger.Debug($"[Subframes] Auth header set: Bearer {preview}");
+                SubframesLogger.Debug($"Auth header set: Bearer {preview}");
             }
             else
             {
-                Logger.Debug("[Subframes] No API key configured — request will be unauthenticated");
+                SubframesLogger.Debug("No API key configured — request will be unauthenticated");
             }
 
             return base.SendAsync(request, ct);
@@ -159,13 +160,13 @@ public sealed class SubframesClient : IDisposable
                     response.Headers.RetryAfter?.Delta is TimeSpan delta)
                 {
                     delayMs = (int)Math.Min(delta.TotalMilliseconds, 30_000);
-                    Logger.Info($"[Subframes] Rate limited (429). Retry-After {delayMs} ms. " +
+                    SubframesLogger.Info($"Rate limited (429). Retry-After {delayMs} ms. " +
                                 $"Attempt {attempt + 1}/{totalAttempts}");
                 }
                 else
                 {
                     delayMs = RetryDelaysMs[attempt];
-                    Logger.Info($"[Subframes] HTTP {statusCode} from {url}, " +
+                    SubframesLogger.Info($"HTTP {statusCode} from {url}, " +
                                 $"retrying in {delayMs} ms (attempt {attempt + 1}/{totalAttempts})");
                 }
 
@@ -184,7 +185,7 @@ public sealed class SubframesClient : IDisposable
                 if (attempt == totalAttempts - 1)
                     throw;
 
-                Logger.Info($"[Subframes] Network error on attempt {attempt + 1}/{totalAttempts}: " +
+                SubframesLogger.Info($"Network error on attempt {attempt + 1}/{totalAttempts}: " +
                             $"{ex.Message}, retrying in {RetryDelaysMs[attempt]} ms");
                 await Task.Delay(RetryDelaysMs[attempt], ct);
             }
@@ -210,20 +211,20 @@ public sealed class SubframesClient : IDisposable
         {
             var url = $"{BaseUrl}/api/v1/ingest/session/start";
             var jsonBytes = SerializeJson(request);
-            Logger.Debug($"[Subframes] POST {url} body={System.Text.Encoding.UTF8.GetString(jsonBytes)}");
+            SubframesLogger.Debug($"POST {url} body={System.Text.Encoding.UTF8.GetString(jsonBytes)}");
 
             using var response = await PostWithRetryAsync(url, jsonBytes, ct);
             if (!response.IsSuccessStatusCode)
             {
                 var body = await response.Content.ReadAsStringAsync(ct);
-                Logger.Error($"[Subframes] StartSession HTTP {(int)response.StatusCode}: {body}");
+                SubframesLogger.Error($"StartSession HTTP {(int)response.StatusCode}: {body}");
                 return null;
             }
 
             var envelope = await response.Content
                 .ReadFromJsonAsync<ApiEnvelope<StartSessionData>>(JsonOptions, ct);
             var sessionId = envelope?.Data?.SessionId;
-            Logger.Info($"[Subframes] Session started: {sessionId} for target '{request.TargetName}'");
+            SubframesLogger.Info($"Session started: {sessionId} for target '{request.TargetName}'");
             return sessionId;
         }
         catch (OperationCanceledException)
@@ -232,7 +233,7 @@ public sealed class SubframesClient : IDisposable
         }
         catch (Exception ex)
         {
-            Logger.Error($"[Subframes] StartSession failed: {ex.Message}");
+            SubframesLogger.Error($"StartSession failed: {ex.Message}");
             return null;
         }
     }
@@ -261,16 +262,16 @@ public sealed class SubframesClient : IDisposable
                 FailedExposures = failedExposures,
             };
             var jsonBytes = SerializeJson(body);
-            Logger.Debug($"[Subframes] POST {url} body={System.Text.Encoding.UTF8.GetString(jsonBytes)}");
+            SubframesLogger.Debug($"POST {url} body={System.Text.Encoding.UTF8.GetString(jsonBytes)}");
 
             using var response = await PostWithRetryAsync(url, jsonBytes, ct);
             response.EnsureSuccessStatusCode();
-            Logger.Info($"[Subframes] Session ended: {sessionId}");
+            SubframesLogger.Info($"Session ended: {sessionId}");
         }
         catch (OperationCanceledException) { }
         catch (Exception ex)
         {
-            Logger.Warning($"[Subframes] EndSession failed (session={sessionId}): {ex.Message}");
+            SubframesLogger.Warning($"EndSession failed (session={sessionId}): {ex.Message}");
         }
     }
 
@@ -291,14 +292,14 @@ public sealed class SubframesClient : IDisposable
         {
             var url = $"{BaseUrl}/api/v1/ingest/session/target/start";
             var jsonBytes = SerializeJson(request);
-            Logger.Debug($"[Subframes] POST {url} body={System.Text.Encoding.UTF8.GetString(jsonBytes)}");
+            SubframesLogger.Debug($"POST {url} body={System.Text.Encoding.UTF8.GetString(jsonBytes)}");
 
             using var response = await PostWithRetryAsync(url, jsonBytes, ct);
 
             // 404 means the API version doesn't support multi-target — fall back silently.
             if (response.StatusCode == System.Net.HttpStatusCode.NotFound)
             {
-                Logger.Info("[Subframes] target/start endpoint not found — running single-target mode");
+                SubframesLogger.Info("target/start endpoint not found — running single-target mode");
                 return null;
             }
 
@@ -307,7 +308,7 @@ public sealed class SubframesClient : IDisposable
             var envelope = await response.Content
                 .ReadFromJsonAsync<ApiEnvelope<StartSessionTargetData>>(JsonOptions, ct);
             var targetId = envelope?.Data?.SessionTargetId;
-            Logger.Info($"[Subframes] Target started: {targetId} name='{request.TargetName}'");
+            SubframesLogger.Info($"Target started: {targetId} name='{request.TargetName}'");
             return targetId;
         }
         catch (OperationCanceledException)
@@ -316,7 +317,7 @@ public sealed class SubframesClient : IDisposable
         }
         catch (Exception ex)
         {
-            Logger.Warning($"[Subframes] StartTarget failed: {ex.Message}");
+            SubframesLogger.Warning($"StartTarget failed: {ex.Message}");
             return null;
         }
     }
@@ -337,23 +338,23 @@ public sealed class SubframesClient : IDisposable
         {
             var url = $"{BaseUrl}/api/v1/ingest/session/target/end";
             var jsonBytes = SerializeJson(request);
-            Logger.Debug($"[Subframes] POST {url} body={System.Text.Encoding.UTF8.GetString(jsonBytes)}");
+            SubframesLogger.Debug($"POST {url} body={System.Text.Encoding.UTF8.GetString(jsonBytes)}");
 
             using var response = await PostWithRetryAsync(url, jsonBytes, ct);
 
             if (response.StatusCode == System.Net.HttpStatusCode.NotFound)
             {
-                Logger.Debug("[Subframes] target/end endpoint not found — no-op");
+                SubframesLogger.Debug("target/end endpoint not found — no-op");
                 return;
             }
 
             response.EnsureSuccessStatusCode();
-            Logger.Info($"[Subframes] Target ended: {request.SessionTargetId}");
+            SubframesLogger.Info($"Target ended: {request.SessionTargetId}");
         }
         catch (OperationCanceledException) { }
         catch (Exception ex)
         {
-            Logger.Warning($"[Subframes] EndTarget failed: {ex.Message}");
+            SubframesLogger.Warning($"EndTarget failed: {ex.Message}");
         }
     }
 
@@ -373,24 +374,24 @@ public sealed class SubframesClient : IDisposable
         {
             var url = $"{BaseUrl}/api/v1/ingest/session/status";
             var jsonBytes = SerializeJson(request);
-            Logger.Debug($"[Subframes] POST {url} body={System.Text.Encoding.UTF8.GetString(jsonBytes)}");
+            SubframesLogger.Debug($"POST {url} body={System.Text.Encoding.UTF8.GetString(jsonBytes)}");
 
             using var response = await PostWithRetryAsync(url, jsonBytes, ct);
 
             if (response.StatusCode == System.Net.HttpStatusCode.NotFound)
             {
-                Logger.Debug("[Subframes] session/status endpoint not found — no-op");
+                SubframesLogger.Debug("session/status endpoint not found — no-op");
                 return;
             }
 
             response.EnsureSuccessStatusCode();
-            Logger.Info($"[Subframes] Session status updated: {request.Status}" +
+            SubframesLogger.Info($"Session status updated: {request.Status}" +
                         (request.WaitReason is not null ? $" ({request.WaitReason})" : ""));
         }
         catch (OperationCanceledException) { }
         catch (Exception ex)
         {
-            Logger.Warning($"[Subframes] UpdateSessionStatus failed: {ex.Message}");
+            SubframesLogger.Warning($"UpdateSessionStatus failed: {ex.Message}");
         }
     }
 
@@ -412,18 +413,18 @@ public sealed class SubframesClient : IDisposable
         try
         {
             var url = $"{BaseUrl}/api/v1/ingest/heartbeat";
-            Logger.Debug($"[Subframes] POST {url} body={JsonSerializer.Serialize(request, JsonOptions)}");
+            SubframesLogger.Debug($"POST {url} body={JsonSerializer.Serialize(request, JsonOptions)}");
             using var response = await _http.PostAsJsonAsync(url, request, JsonOptions, cts.Token);
             response.EnsureSuccessStatusCode();
-            Logger.Debug($"[Subframes] Heartbeat sent for session {request.SessionId}");
+            SubframesLogger.Debug($"Heartbeat sent for session {request.SessionId}");
         }
         catch (OperationCanceledException)
         {
-            Logger.Warning($"[Subframes] Heartbeat timed out (session={request.SessionId})");
+            SubframesLogger.Warning($"Heartbeat timed out (session={request.SessionId})");
         }
         catch (Exception ex)
         {
-            Logger.Warning($"[Subframes] Heartbeat failed (session={request.SessionId}): {ex.Message}");
+            SubframesLogger.Warning($"Heartbeat failed (session={request.SessionId}): {ex.Message}");
         }
     }
 
@@ -446,23 +447,23 @@ public sealed class SubframesClient : IDisposable
         try
         {
             var url = $"{BaseUrl}/api/v1/ingest/station/heartbeat";
-            Logger.Debug($"[Subframes] POST {url} body={JsonSerializer.Serialize(request, JsonOptions)}");
+            SubframesLogger.Debug($"POST {url} body={JsonSerializer.Serialize(request, JsonOptions)}");
             using var response = await _http.PostAsJsonAsync(url, request, JsonOptions, cts.Token);
             if (!response.IsSuccessStatusCode)
             {
                 var body = await response.Content.ReadAsStringAsync(cts.Token);
-                Logger.Warning($"[Subframes] Station heartbeat failed: {(int)response.StatusCode} {response.ReasonPhrase} — {body}");
+                SubframesLogger.Warning($"Station heartbeat failed: {(int)response.StatusCode} {response.ReasonPhrase} — {body}");
                 return;
             }
-            Logger.Debug($"[Subframes] Station heartbeat sent (status={request.Status})");
+            SubframesLogger.Debug($"Station heartbeat sent (status={request.Status})");
         }
         catch (OperationCanceledException)
         {
-            Logger.Warning("[Subframes] Station heartbeat timed out");
+            SubframesLogger.Warning("Station heartbeat timed out");
         }
         catch (Exception ex)
         {
-            Logger.Warning($"[Subframes] Station heartbeat failed: {ex.Message}");
+            SubframesLogger.Warning($"Station heartbeat failed: {ex.Message}");
         }
     }
 
@@ -488,7 +489,7 @@ public sealed class SubframesClient : IDisposable
                 Frames = frames
             };
             var jsonBytes = SerializeJson(body);
-            Logger.Debug($"[Subframes] POST {url} body={System.Text.Encoding.UTF8.GetString(jsonBytes)}");
+            SubframesLogger.Debug($"POST {url} body={System.Text.Encoding.UTF8.GetString(jsonBytes)}");
 
             using var response = await PostWithRetryAsync(url, jsonBytes, ct);
             response.EnsureSuccessStatusCode();
@@ -496,7 +497,7 @@ public sealed class SubframesClient : IDisposable
             var envelope = await response.Content
                 .ReadFromJsonAsync<ApiEnvelope<IngestFramesData>>(JsonOptions, ct);
             var data = envelope?.Data;
-            Logger.Debug($"[Subframes] Frames ingested: accepted={data?.Accepted} rejected={data?.Rejected}");
+            SubframesLogger.Debug($"Frames ingested: accepted={data?.Accepted} rejected={data?.Rejected}");
             return data;
         }
         catch (OperationCanceledException)
@@ -505,7 +506,7 @@ public sealed class SubframesClient : IDisposable
         }
         catch (Exception ex)
         {
-            Logger.Warning($"[Subframes] IngestFrames failed (session={sessionId}): {ex.Message}");
+            SubframesLogger.Warning($"IngestFrames failed (session={sessionId}): {ex.Message}");
             return null;
         }
     }
@@ -543,22 +544,22 @@ public sealed class SubframesClient : IDisposable
 
             if (response.StatusCode == System.Net.HttpStatusCode.NotFound)
             {
-                Logger.Info("[Subframes] Thumbnail endpoint not found — skipping (endpoint not yet deployed)");
+                SubframesLogger.Info("Thumbnail endpoint not found — skipping (endpoint not yet deployed)");
                 return;
             }
 
             if (!response.IsSuccessStatusCode)
-                Logger.Warning($"[Subframes] UploadThumbnail HTTP {(int)response.StatusCode}");
+                SubframesLogger.Warning($"UploadThumbnail HTTP {(int)response.StatusCode}");
             else
-                Logger.Debug($"[Subframes] Thumbnail uploaded: sessionId={sessionId} frameNumber={frameNumber} size={jpeg.Length}B");
+                SubframesLogger.Debug($"Thumbnail uploaded: sessionId={sessionId} frameNumber={frameNumber} size={jpeg.Length}B");
         }
         catch (OperationCanceledException)
         {
-            Logger.Warning($"[Subframes] Thumbnail upload timed out (session={sessionId} frame={frameNumber})");
+            SubframesLogger.Warning($"Thumbnail upload timed out (session={sessionId} frame={frameNumber})");
         }
         catch (Exception ex)
         {
-            Logger.Warning($"[Subframes] UploadThumbnail failed (session={sessionId} frame={frameNumber}): {ex.Message}");
+            SubframesLogger.Warning($"UploadThumbnail failed (session={sessionId} frame={frameNumber}): {ex.Message}");
         }
     }
 
@@ -667,29 +668,29 @@ public sealed class SubframesClient : IDisposable
             var url = $"{BaseUrl}/api/v1/ingest/session/{sessionId}/ts-grading";
             var body = new TsGradingRequest { Entries = entries };
             var jsonBytes = SerializeJson(body);
-            Logger.Debug($"[Subframes] POST {url} entries={entries.Count}");
+            SubframesLogger.Debug($"POST {url} entries={entries.Count}");
 
             using var response = await PostWithRetryAsync(url, jsonBytes, ct);
 
             if (response.StatusCode == System.Net.HttpStatusCode.NotFound)
             {
-                Logger.Debug("[Subframes] ts-grading endpoint not found — no-op");
+                SubframesLogger.Debug("ts-grading endpoint not found — no-op");
                 return;
             }
 
             if (!response.IsSuccessStatusCode)
             {
                 var errorBody = await response.Content.ReadAsStringAsync(ct);
-                Logger.Warning($"[Subframes] PostTsGrading HTTP {(int)response.StatusCode}: {errorBody}");
+                SubframesLogger.Warning($"PostTsGrading HTTP {(int)response.StatusCode}: {errorBody}");
                 return;
             }
 
-            Logger.Info($"[Subframes] TS grading sent: {entries.Count} entry/entries for session {sessionId}");
+            SubframesLogger.Info($"TS grading sent: {entries.Count} entry/entries for session {sessionId}");
         }
         catch (OperationCanceledException) { }
         catch (Exception ex)
         {
-            Logger.Warning($"[Subframes] PostTsGrading failed (session={sessionId}): {ex.Message}");
+            SubframesLogger.Warning($"PostTsGrading failed (session={sessionId}): {ex.Message}");
         }
     }
 
@@ -709,29 +710,29 @@ public sealed class SubframesClient : IDisposable
             var url = $"{BaseUrl}/api/v1/ingest/session/{sessionId}/ts-progress";
             var body = new TsProgressRequest { Entries = entries };
             var jsonBytes = SerializeJson(body);
-            Logger.Debug($"[Subframes] POST {url} entries={entries.Count}");
+            SubframesLogger.Debug($"POST {url} entries={entries.Count}");
 
             using var response = await PostWithRetryAsync(url, jsonBytes, ct);
 
             if (response.StatusCode == System.Net.HttpStatusCode.NotFound)
             {
-                Logger.Debug("[Subframes] ts-progress endpoint not found — no-op");
+                SubframesLogger.Debug("ts-progress endpoint not found — no-op");
                 return;
             }
 
             if (!response.IsSuccessStatusCode)
             {
                 var errorBody = await response.Content.ReadAsStringAsync(ct);
-                Logger.Warning($"[Subframes] PostTsProgress HTTP {(int)response.StatusCode}: {errorBody}");
+                SubframesLogger.Warning($"PostTsProgress HTTP {(int)response.StatusCode}: {errorBody}");
                 return;
             }
 
-            Logger.Info($"[Subframes] TS progress sent: {entries.Count} row(s) for session {sessionId}");
+            SubframesLogger.Info($"TS progress sent: {entries.Count} row(s) for session {sessionId}");
         }
         catch (OperationCanceledException) { }
         catch (Exception ex)
         {
-            Logger.Warning($"[Subframes] PostTsProgress failed (session={sessionId}): {ex.Message}");
+            SubframesLogger.Warning($"PostTsProgress failed (session={sessionId}): {ex.Message}");
         }
     }
 
@@ -756,26 +757,26 @@ public sealed class SubframesClient : IDisposable
         {
             var url = $"{BaseUrl}/api/v1/ingest/event";
             var jsonBytes = SerializeJson(request);
-            Logger.Debug($"[Subframes] POST {url} body={System.Text.Encoding.UTF8.GetString(jsonBytes)}");
+            SubframesLogger.Debug($"POST {url} body={System.Text.Encoding.UTF8.GetString(jsonBytes)}");
 
             using var response = await _http.PostAsync(url, CreateJsonContent(jsonBytes), cts.Token);
 
             if (!response.IsSuccessStatusCode)
             {
                 var body = await response.Content.ReadAsStringAsync(cts.Token);
-                Logger.Warning($"[Subframes] PostEvent HTTP {(int)response.StatusCode}: {body}");
+                SubframesLogger.Warning($"PostEvent HTTP {(int)response.StatusCode}: {body}");
                 return;
             }
 
-            Logger.Debug($"[Subframes] Event posted: type={request.EventType} session={request.SessionId}");
+            SubframesLogger.Debug($"Event posted: type={request.EventType} session={request.SessionId}");
         }
         catch (OperationCanceledException)
         {
-            Logger.Warning($"[Subframes] PostEvent timed out (type={request.EventType} session={request.SessionId})");
+            SubframesLogger.Warning($"PostEvent timed out (type={request.EventType} session={request.SessionId})");
         }
         catch (Exception ex)
         {
-            Logger.Warning($"[Subframes] PostEvent failed (type={request.EventType}): {ex.Message}");
+            SubframesLogger.Warning($"PostEvent failed (type={request.EventType}): {ex.Message}");
         }
     }
 

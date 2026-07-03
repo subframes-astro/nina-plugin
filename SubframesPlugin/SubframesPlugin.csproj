@@ -35,6 +35,10 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <Reference Include="NLog">
+      <HintPath>$(NinaSdkPath)\NLog.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
     <Reference Include="NINA.Core">
       <HintPath>$(NinaSdkPath)\NINA.Core.dll</HintPath>
       <Private>false</Private>

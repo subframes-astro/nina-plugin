@@ -122,7 +122,7 @@ public class SubframesPlugin : PluginBase, IPluginManifest, IPartImportsSatisfie
         var existing = Interlocked.CompareExchange(ref _primary, this, null);
         if (existing is not null)
         {
-            Logger.Warning("[Subframes] Duplicate plugin instance created by MEF - proxying to primary to prevent duplicate sessions/sync.");
+            SubframesLogger.Warning("Duplicate plugin instance created by MEF - proxying to primary to prevent duplicate sessions/sync.");
             _isPrimary = false;
             // Share the primary's service objects so sequence items work.
             _sessionService = existing._sessionService;
@@ -179,9 +179,9 @@ public class SubframesPlugin : PluginBase, IPluginManifest, IPartImportsSatisfie
 
         var pending = _frameCache.GetPendingCount();
         if (pending > 0)
-            Logger.Info($"[Subframes] {pending} cached frames pending sync from previous session.");
+            SubframesLogger.Info($"{pending} cached frames pending sync from previous session.");
 
-        Logger.Info("[Subframes] Plugin loaded (primary instance).");
+        SubframesLogger.Info("Plugin loaded (primary instance).");
     }
 
     // Expose singletons so MEF-constructed sequence items can import them.
@@ -207,6 +207,9 @@ public class SubframesPlugin : PluginBase, IPluginManifest, IPartImportsSatisfie
     /// </summary>
     public void OnImportsSatisfied()
     {
+        if (_isPrimary)
+            SubframesLogger.Initialize();
+
         if (!_isPrimary || SequenceMediator is null)
             return;
 
@@ -214,7 +217,7 @@ public class SubframesPlugin : PluginBase, IPluginManifest, IPartImportsSatisfie
             return;
 
         // SequenceMediator exists but internals aren't ready yet - retry in background.
-        Logger.Warning("[Subframes] Sequence event subscription deferred - SequenceMediator internals not yet initialized.");
+        SubframesLogger.Warning("Sequence event subscription deferred - SequenceMediator internals not yet initialized.");
         var cts = new CancellationTokenSource();
         _sequenceRetrySubscribeCts = cts;
         _ = RetrySubscribeSequenceEventsAsync(cts.Token);
@@ -236,11 +239,11 @@ public class SubframesPlugin : PluginBase, IPluginManifest, IPartImportsSatisfie
             {
                 _sequenceStartedDelegate = Delegate.CreateDelegate(evtType, this, nameof(OnSequenceStarted));
                 seqStartedEvent.AddEventHandler(SequenceMediator, _sequenceStartedDelegate);
-                Logger.Debug("[Subframes] Subscribed to ISequenceMediator.SequenceStarted (via reflection).");
+                SubframesLogger.Debug("Subscribed to ISequenceMediator.SequenceStarted (via reflection).");
             }
             else
             {
-                Logger.Info("[Subframes] ISequenceMediator.SequenceStarted not present in this NINA build - session will open on first captured image instead.");
+                SubframesLogger.Info("ISequenceMediator.SequenceStarted not present in this NINA build - session will open on first captured image instead.");
             }
 
             _sequenceEventsSubscribed = true;
@@ -251,12 +254,12 @@ public class SubframesPlugin : PluginBase, IPluginManifest, IPartImportsSatisfie
                 try { return _profileService.ActiveProfile?.Name; }
                 catch { return null; }
             };
-            Logger.Debug("[Subframes] Subscribed to ISequenceMediator.SequenceFinished.");
+            SubframesLogger.Debug("Subscribed to ISequenceMediator.SequenceFinished.");
             return true;
         }
         catch (Exception ex)
         {
-            Logger.Debug($"[Subframes] Sequence event subscription attempt failed: {ex.Message}");
+            SubframesLogger.Debug($"Sequence event subscription attempt failed: {ex.Message}");
             return false;
         }
     }
@@ -276,12 +279,12 @@ public class SubframesPlugin : PluginBase, IPluginManifest, IPartImportsSatisfie
 
             if (TrySubscribeSequenceEvents())
             {
-                Logger.Info($"[Subframes] Deferred sequence event subscription succeeded after {(i + 1) * 2}s.");
+                SubframesLogger.Info($"Deferred sequence event subscription succeeded after {(i + 1) * 2}s.");
                 return;
             }
         }
 
-        Logger.Warning("[Subframes] Gave up subscribing to sequence events after 60s - sessions will not auto-open/close on sequence start/end.");
+        SubframesLogger.Warning("Gave up subscribing to sequence events after 60s - sessions will not auto-open/close on sequence start/end.");
     }
 
     /// <summary>
@@ -351,9 +354,9 @@ public class SubframesPlugin : PluginBase, IPluginManifest, IPartImportsSatisfie
             // This is the safety net for sessions kept alive during unsafe periods.
             if (_sessionService.HasActiveSession)
             {
-                Logger.Info("[Subframes] Teardown: ending active session before plugin unload.");
+                SubframesLogger.Info("Teardown: ending active session before plugin unload.");
                 try { await _sessionService.EndSessionAsync(CancellationToken.None); }
-                catch (Exception ex) { Logger.Warning($"[Subframes] Teardown EndSession failed: {ex.Message}"); }
+                catch (Exception ex) { SubframesLogger.Warning($"Teardown EndSession failed: {ex.Message}"); }
             }
 
             _sequenceRetrySubscribeCts?.Cancel();
@@ -383,11 +386,12 @@ public class SubframesPlugin : PluginBase, IPluginManifest, IPartImportsSatisfie
             _sessionService.Dispose();
             _frameCache.Dispose();
             Interlocked.CompareExchange(ref _primary, null, this);
-            Logger.Info("[Subframes] Plugin unloaded (primary instance).");
+            SubframesLogger.Info("Plugin unloaded (primary instance).");
+            SubframesLogger.Shutdown();
         }
         else
         {
-            Logger.Info("[Subframes] Plugin unloaded (secondary proxy instance).");
+            SubframesLogger.Info("Plugin unloaded (secondary proxy instance).");
         }
         await base.Teardown();
     }
@@ -429,7 +433,7 @@ public class SubframesPlugin : PluginBase, IPluginManifest, IPartImportsSatisfie
         }
         catch (Exception ex)
         {
-            Logger.Debug($"[Subframes] Could not read targets from sequence: {ex.Message}");
+            SubframesLogger.Debug($"Could not read targets from sequence: {ex.Message}");
         }
 
         // Bug 2: RA=0/Dec=0 is the vernal equinox - not a real DSO target.
@@ -447,14 +451,14 @@ public class SubframesPlugin : PluginBase, IPluginManifest, IPartImportsSatisfie
             {
                 const string toast = "Subframes: no \"Start Subframes Session\" command found in this sequence. "
                     + "Add it to Sequence Start for explicit session control.";
-                Logger.Warning("[Subframes] Sequence started without a \"Start Subframes Session\" instruction. "
+                SubframesLogger.Warning("Sequence started without a \"Start Subframes Session\" instruction. "
                     + "Add it to the Sequence Start area for explicit session control.");
                 Notification.ShowWarning(toast);
             }
         }
         catch (Exception ex)
         {
-            Logger.Debug($"[Subframes] StartSessionItem presence check failed: {ex.Message}");
+            SubframesLogger.Debug($"StartSessionItem presence check failed: {ex.Message}");
         }
 
         if (_sessionService.HasActiveSession)
@@ -495,17 +499,17 @@ public class SubframesPlugin : PluginBase, IPluginManifest, IPartImportsSatisfie
             // Keep the session alive so post-recovery frames are captured.
             if (_sessionService.LastKnownIsSafe == false)
             {
-                Logger.Info("[Subframes] Sequence ended while safety monitor reports unsafe — " +
+                SubframesLogger.Info("Sequence ended while safety monitor reports unsafe — " +
                             "keeping session alive for post-recovery continuity.");
                 return Task.CompletedTask;
             }
 
-            Logger.Info("[Subframes] Sequence run ended - closing active session.");
+            SubframesLogger.Info("Sequence run ended - closing active session.");
             // Preserve the cached preview for the Tonight's Plan post-dawn heartbeat.
             if (_tsPreviewState == TsPreviewState.Active || _tsPreviewState == TsPreviewState.Startup)
             {
                 _tsPreviewState = TsPreviewState.Idle_CachedPreview;
-                Logger.Debug("[Subframes] TS preview state: → IDLE_CACHED_PREVIEW (session ended).");
+                SubframesLogger.Debug("TS preview state: → IDLE_CACHED_PREVIEW (session ended).");
             }
             _ = _sessionService.EndSessionAsync(CancellationToken.None);
         }
@@ -524,7 +528,7 @@ public class SubframesPlugin : PluginBase, IPluginManifest, IPartImportsSatisfie
         _tsPreviewStartupTime = DateTime.UtcNow;
         _tsLastPreviewFetch = DateTime.UtcNow;
         _initialNightPreview = null; // Clear so we capture a fresh night plan for this session
-        Logger.Info("[Subframes] TS preview state: -> ACTIVE (session started).");
+        SubframesLogger.Info("TS preview state: -> ACTIVE (session started).");
 
         // Fire-and-forget: fetch preview with stabilization, then send heartbeat.
         _ = Task.Run(async () =>
@@ -533,7 +537,7 @@ public class SubframesPlugin : PluginBase, IPluginManifest, IPartImportsSatisfie
             {
                 await FetchAndUpdateTsPreviewAsync(CancellationToken.None).ConfigureAwait(false);
                 var firstCount = _currentTsPreview?.Blocks?.Count ?? 0;
-                Logger.Debug($"[Subframes] OnSessionStarted: initial TS preview fetch complete ({firstCount} blocks).");
+                SubframesLogger.Debug($"OnSessionStarted: initial TS preview fetch complete ({firstCount} blocks).");
 
                 // Stabilization: wait briefly and re-fetch to confirm the TS API
                 // has finished computing all targets. If the block count increases,
@@ -544,7 +548,7 @@ public class SubframesPlugin : PluginBase, IPluginManifest, IPartImportsSatisfie
                     var prevCount = _currentTsPreview?.Blocks?.Count ?? 0;
                     await FetchAndUpdateTsPreviewAsync(CancellationToken.None).ConfigureAwait(false);
                     var newCount = _currentTsPreview?.Blocks?.Count ?? 0;
-                    Logger.Debug($"[Subframes] OnSessionStarted: stabilization check {attempt + 1} ({prevCount} -> {newCount} blocks).");
+                    SubframesLogger.Debug($"OnSessionStarted: stabilization check {attempt + 1} ({prevCount} -> {newCount} blocks).");
                     if (newCount <= prevCount) break; // Stable — stop re-fetching.
                 }
 
@@ -557,12 +561,12 @@ public class SubframesPlugin : PluginBase, IPluginManifest, IPartImportsSatisfie
                 if (_currentTsPreview is { Blocks.Count: > 0 })
                 {
                     _initialNightPreview = _currentTsPreview;
-                    Logger.Info($"[Subframes] Cached initial night preview: {_initialNightPreview.Blocks.Count} blocks.");
+                    SubframesLogger.Info($"Cached initial night preview: {_initialNightPreview.Blocks.Count} blocks.");
                 }
             }
             catch (Exception ex)
             {
-                Logger.Warning($"[Subframes] OnSessionStarted: TS preview fetch failed: {ex.Message}");
+                SubframesLogger.Warning($"OnSessionStarted: TS preview fetch failed: {ex.Message}");
             }
 
             try
@@ -571,7 +575,7 @@ public class SubframesPlugin : PluginBase, IPluginManifest, IPartImportsSatisfie
             }
             catch (Exception ex)
             {
-                Logger.Warning($"[Subframes] OnSessionStarted: station heartbeat failed: {ex.Message}");
+                SubframesLogger.Warning($"OnSessionStarted: station heartbeat failed: {ex.Message}");
             }
         });
     }
@@ -617,7 +621,7 @@ public class SubframesPlugin : PluginBase, IPluginManifest, IPartImportsSatisfie
         }
         catch (Exception ex)
         {
-            Logger.Debug($"[Subframes] ResolveActiveTarget failed: {ex.Message}");
+            SubframesLogger.Debug($"ResolveActiveTarget failed: {ex.Message}");
         }
         return null;
     }
@@ -639,7 +643,7 @@ public class SubframesPlugin : PluginBase, IPluginManifest, IPartImportsSatisfie
         }
         catch (Exception ex)
         {
-            Logger.Debug($"[Subframes] GetSequenceCurrentItems failed: {ex.Message}");
+            SubframesLogger.Debug($"GetSequenceCurrentItems failed: {ex.Message}");
             return null;
         }
     }
@@ -752,11 +756,11 @@ public class SubframesPlugin : PluginBase, IPluginManifest, IPartImportsSatisfie
             }
 
             if (_containerSubscriptions.Count > 0)
-                Logger.Debug($"[Subframes] Subscribed to PropertyChanged for {_containerSubscriptions.Count} DSO container(s).");
+                SubframesLogger.Debug($"Subscribed to PropertyChanged for {_containerSubscriptions.Count} DSO container(s).");
         }
         catch (Exception ex)
         {
-            Logger.Debug($"[Subframes] SubscribeToDsoContainerEvents error: {ex.Message}");
+            SubframesLogger.Debug($"SubscribeToDsoContainerEvents error: {ex.Message}");
         }
     }
 
@@ -796,12 +800,12 @@ public class SubframesPlugin : PluginBase, IPluginManifest, IPartImportsSatisfie
             if (ra == 0 && dec == 0) return;
 
             var normalized = CatalogNameNormalizer.Normalize(name);
-            Logger.Debug($"[Subframes] DSO container RUNNING: '{normalized}' RA={ra:F4} Dec={dec:F4}");
+            SubframesLogger.Debug($"DSO container RUNNING: '{normalized}' RA={ra:F4} Dec={dec:F4}");
             _ = _sessionService.OnDSOContainerStartedAsync(normalized, ra, dec);
         }
         catch (Exception ex)
         {
-            Logger.Debug($"[Subframes] OnContainerPropertyChanged error: {ex.Message}");
+            SubframesLogger.Debug($"OnContainerPropertyChanged error: {ex.Message}");
         }
     }
 
@@ -898,30 +902,30 @@ public class SubframesPlugin : PluginBase, IPluginManifest, IPartImportsSatisfie
                         const int pollIntervalSeconds = 60;
                         const int maxPolls = 5; // After initial delay: up to 5×60s = 5 more min
 
-                        Logger.Info($"[Subframes] One-shot TS preview: waiting {initialDelaySeconds} s for TS to begin computing schedule.");
+                        SubframesLogger.Info($"One-shot TS preview: waiting {initialDelaySeconds} s for TS to begin computing schedule.");
                         await Task.Delay(TimeSpan.FromSeconds(initialDelaySeconds), fetchCt).ConfigureAwait(false);
 
                         await FetchAndUpdateTsPreviewAsync(fetchCt).ConfigureAwait(false);
                         var previousTargetCount = _currentTsPreview?.Blocks?
                             .Count(b => !b.WaitPeriod && b.ExposurePlans is { Count: > 0 }) ?? 0;
-                        Logger.Info($"[Subframes] One-shot TS preview initial fetch: {previousTargetCount} target block(s) with exposure plans.");
+                        SubframesLogger.Info($"One-shot TS preview initial fetch: {previousTargetCount} target block(s) with exposure plans.");
 
                         // Poll until stabilized (two consecutive fetches with same count)
                         // or we exhaust retries.
                         for (int poll = 0; poll < maxPolls; poll++)
                         {
-                            Logger.Info($"[Subframes] One-shot TS preview: waiting {pollIntervalSeconds} s for stabilization check (poll {poll + 1}/{maxPolls}).");
+                            SubframesLogger.Info($"One-shot TS preview: waiting {pollIntervalSeconds} s for stabilization check (poll {poll + 1}/{maxPolls}).");
                             await Task.Delay(TimeSpan.FromSeconds(pollIntervalSeconds), fetchCt).ConfigureAwait(false);
 
                             await FetchAndUpdateTsPreviewAsync(fetchCt).ConfigureAwait(false);
                             var currentTargetCount = _currentTsPreview?.Blocks?
                                 .Count(b => !b.WaitPeriod && b.ExposurePlans is { Count: > 0 }) ?? 0;
 
-                            Logger.Info($"[Subframes] One-shot TS preview poll {poll + 1}: {currentTargetCount} target block(s) (previous: {previousTargetCount}).");
+                            SubframesLogger.Info($"One-shot TS preview poll {poll + 1}: {currentTargetCount} target block(s) (previous: {previousTargetCount}).");
 
                             if (currentTargetCount > 0 && currentTargetCount == previousTargetCount)
                             {
-                                Logger.Info("[Subframes] One-shot TS preview: schedule stabilized.");
+                                SubframesLogger.Info("One-shot TS preview: schedule stabilized.");
                                 break;
                             }
 
@@ -931,13 +935,13 @@ public class SubframesPlugin : PluginBase, IPluginManifest, IPartImportsSatisfie
                         var totalTargetBlocks = _currentTsPreview?.Blocks?
                             .Count(b => !b.WaitPeriod && b.ExposurePlans is { Count: > 0 }) ?? 0;
                         var blockCount = _currentTsPreview?.Blocks?.Count ?? 0;
-                        Logger.Info($"[Subframes] One-shot TS preview fetch complete (pre-session, {blockCount} blocks, {totalTargetBlocks} targets with plans).");
+                        SubframesLogger.Info($"One-shot TS preview fetch complete (pre-session, {blockCount} blocks, {totalTargetBlocks} targets with plans).");
 
                         // Cache as initial night preview if not already set by OnSessionStarted.
                         if (_initialNightPreview is null && _currentTsPreview is { Blocks.Count: > 0 })
                         {
                             _initialNightPreview = _currentTsPreview;
-                            Logger.Info($"[Subframes] Cached initial night preview from one-shot: {_initialNightPreview.Blocks.Count} blocks.");
+                            SubframesLogger.Info($"Cached initial night preview from one-shot: {_initialNightPreview.Blocks.Count} blocks.");
                         }
 
                         // The preview heartbeat is the most valuable one (it carries
@@ -954,7 +958,7 @@ public class SubframesPlugin : PluginBase, IPluginManifest, IPartImportsSatisfie
                     catch (OperationCanceledException) { /* normal shutdown */ }
                     catch (Exception ex)
                     {
-                        Logger.Debug($"[Subframes] One-shot TS preview fetch failed: {ex.Message}");
+                        SubframesLogger.Debug($"One-shot TS preview fetch failed: {ex.Message}");
                     }
                 });
             }
@@ -963,7 +967,7 @@ public class SubframesPlugin : PluginBase, IPluginManifest, IPartImportsSatisfie
         }
         catch (Exception ex)
         {
-            Logger.Warning($"[Subframes] OnTsStateChanged: immediate station heartbeat failed: {ex.Message}");
+            SubframesLogger.Warning($"OnTsStateChanged: immediate station heartbeat failed: {ex.Message}");
         }
     }
 
@@ -987,15 +991,15 @@ public class SubframesPlugin : PluginBase, IPluginManifest, IPartImportsSatisfie
         var prevTicks = Interlocked.Read(ref _lastStationHeartbeatSentTicks);
         if (nowTicks - prevTicks < TimeSpan.TicksPerSecond * 2)
         {
-            Logger.Debug(
-                $"[Subframes] Station heartbeat suppressed (< 2 s since last send)"
+            SubframesLogger.Debug(
+                $"Station heartbeat suppressed (< 2 s since last send)"
                 + (reason is null ? "." : $" [{reason}]."));
             return false;
         }
 
         Interlocked.Exchange(ref _lastStationHeartbeatSentTicks, nowTicks);
-        Logger.Info(
-            $"[Subframes] Firing station heartbeat"
+        SubframesLogger.Info(
+            $"Firing station heartbeat"
             + (reason is null ? "." : $" [{reason}]."));
         _ = _apiClient.SendStationHeartbeatAsync(BuildStationHeartbeatRequest(), CancellationToken.None);
         return true;
@@ -1010,7 +1014,7 @@ public class SubframesPlugin : PluginBase, IPluginManifest, IPartImportsSatisfie
         // (observed ~600 ms) with generous margin for slower machines.
         if (_tsDetector?.CurrentState == "none")
         {
-            Logger.Info("[Subframes] TS not detected at startup - deferring first heartbeat to allow plugin load to complete.");
+            SubframesLogger.Info("TS not detected at startup - deferring first heartbeat to allow plugin load to complete.");
             try
             {
                 await Task.Delay(TimeSpan.FromSeconds(5), ct).ConfigureAwait(false);
@@ -1056,7 +1060,7 @@ public class SubframesPlugin : PluginBase, IPluginManifest, IPartImportsSatisfie
         }
         catch (Exception ex)
         {
-            Logger.Error($"[Subframes] Station heartbeat loop terminated unexpectedly: {ex.Message}");
+            SubframesLogger.Error($"Station heartbeat loop terminated unexpectedly: {ex.Message}");
         }
     }
 
@@ -1066,7 +1070,7 @@ public class SubframesPlugin : PluginBase, IPluginManifest, IPartImportsSatisfie
 
         List<DeviceDto>? devices = null;
         try { devices = BuildDevices(); }
-        catch (Exception ex) { Logger.Warning($"[Subframes] Station heartbeat: could not collect device statuses: {ex.Message}"); }
+        catch (Exception ex) { SubframesLogger.Warning($"Station heartbeat: could not collect device statuses: {ex.Message}"); }
 
         StationEquipmentDto? equipment = null;
         StationLocationDto? location = null;
@@ -1140,7 +1144,7 @@ public class SubframesPlugin : PluginBase, IPluginManifest, IPartImportsSatisfie
         }
         catch (Exception ex)
         {
-            Logger.Warning($"[Subframes] Station heartbeat: could not read equipment profile: {ex.Message}");
+            SubframesLogger.Warning($"Station heartbeat: could not read equipment profile: {ex.Message}");
         }
 
         try
@@ -1157,7 +1161,7 @@ public class SubframesPlugin : PluginBase, IPluginManifest, IPartImportsSatisfie
         }
         catch (Exception ex)
         {
-            Logger.Warning($"[Subframes] Station heartbeat: could not read location profile: {ex.Message}");
+            SubframesLogger.Warning($"Station heartbeat: could not read location profile: {ex.Message}");
         }
 
         var status = _sessionService.HasActiveSession ? "imaging" : "online";
@@ -1188,7 +1192,7 @@ public class SubframesPlugin : PluginBase, IPluginManifest, IPartImportsSatisfie
         }
         catch (Exception ex)
         {
-            Logger.Debug($"[Subframes] Station heartbeat: TS progress skipped ({ex.GetType().Name}: {ex.Message})");
+            SubframesLogger.Debug($"Station heartbeat: TS progress skipped ({ex.GetType().Name}: {ex.Message})");
         }
 
         var request = new StationHeartbeatRequest
@@ -1217,9 +1221,9 @@ public class SubframesPlugin : PluginBase, IPluginManifest, IPartImportsSatisfie
             .Where(b => !b.WaitPeriod)
             .Select(b => $"'{b.TargetName}' {b.StartTime}->{b.EndTime}")
             .ToList();
-        Logger.Debug($"[Subframes] BuildStationHeartbeatRequest: TsPreview={request.TsPreview != null}, blocks={hbBlockCount}, tsDetector={_tsDetector?.CurrentState}, previewState={_tsPreviewState}");
+        SubframesLogger.Debug($"BuildStationHeartbeatRequest: TsPreview={request.TsPreview != null}, blocks={hbBlockCount}, tsDetector={_tsDetector?.CurrentState}, previewState={_tsPreviewState}");
         if (hbTargetNames is { Count: > 0 })
-            Logger.Debug($"[Subframes] BuildStationHeartbeatRequest targets: {string.Join("; ", hbTargetNames)}");
+            SubframesLogger.Debug($"BuildStationHeartbeatRequest targets: {string.Join("; ", hbTargetNames)}");
 
         return request;
     }
@@ -1259,7 +1263,7 @@ public class SubframesPlugin : PluginBase, IPluginManifest, IPartImportsSatisfie
             catch (OperationCanceledException) { /* Normal shutdown */ }
             catch (Exception ex)
             {
-                Logger.Debug($"[Subframes] OnImageSavedTsPreviewCheck failed: {ex.Message}");
+                SubframesLogger.Debug($"OnImageSavedTsPreviewCheck failed: {ex.Message}");
             }
         });
     }
@@ -1286,7 +1290,7 @@ public class SubframesPlugin : PluginBase, IPluginManifest, IPartImportsSatisfie
                 var idleSinceMinutes = (DateTime.UtcNow - _tsLastPreviewFetch).TotalMinutes;
                 if (idleSinceMinutes < 10) continue; // Image-driven fetch was recent enough.
 
-                Logger.Debug("[Subframes] TS preview floor timer: no recent image-driven fetch, polling once.");
+                SubframesLogger.Debug("TS preview floor timer: no recent image-driven fetch, polling once.");
                 var previewChanged = await FetchAndUpdateTsPreviewAsync(ct).ConfigureAwait(false);
                 _tsLastPreviewFetch = DateTime.UtcNow;
                 if (previewChanged)
@@ -1299,7 +1303,7 @@ public class SubframesPlugin : PluginBase, IPluginManifest, IPartImportsSatisfie
         }
         catch (Exception ex)
         {
-            Logger.Error($"[Subframes] TS preview floor timer terminated unexpectedly: {ex.Message}");
+            SubframesLogger.Error($"TS preview floor timer terminated unexpectedly: {ex.Message}");
         }
     }
 
@@ -1368,7 +1372,7 @@ public class SubframesPlugin : PluginBase, IPluginManifest, IPartImportsSatisfie
         }
         catch (Exception ex)
         {
-            Logger.Debug($"[Subframes] FetchAndUpdateTsPreviewAsync error: {ex.Message}");
+            SubframesLogger.Debug($"FetchAndUpdateTsPreviewAsync error: {ex.Message}");
             _currentTsPreview = null;
         }
 

@@ -4,6 +4,7 @@ using NINA.Core.Model;
 using NINA.Core.Utility;
 using NINA.Sequencer.SequenceItem;
 using NINA.Sequencer.Validations;
+using Subframes.NinaPlugin;
 
 namespace Subframes.NinaPlugin.Sequence;
 
@@ -62,7 +63,7 @@ public partial class StartTargetItem : SequenceItem, IValidatable
     {
         if (!_sessionService.HasActiveSession)
         {
-            Logger.Warning("[Subframes] StartTargetItem: no active session — skipping target start.");
+            SubframesLogger.Warning("StartTargetItem: no active session — skipping target start.");
             progress.Report(new ApplicationStatus
             {
                 Status = "Subframes: no active session — skipping target start."
@@ -83,7 +84,7 @@ public partial class StartTargetItem : SequenceItem, IValidatable
 
         if (targetId is not null)
         {
-            Logger.Info($"[Subframes] StartTargetItem complete — targetId={targetId} name='{normalizedName}'");
+            SubframesLogger.Info($"StartTargetItem complete — targetId={targetId} name='{normalizedName}'");
             progress.Report(new ApplicationStatus
             {
                 Status = $"Subframes: target '{normalizedName}' registered."
@@ -92,7 +93,7 @@ public partial class StartTargetItem : SequenceItem, IValidatable
         else
         {
             // 404 / disabled / API unreachable — never abort the sequence.
-            Logger.Info("[Subframes] StartTargetItem: target start returned null (API unavailable or older version).");
+            SubframesLogger.Info("StartTargetItem: target start returned null (API unavailable or older version).");
             progress.Report(new ApplicationStatus
             {
                 Status = $"Subframes: target registration skipped (API unavailable)."

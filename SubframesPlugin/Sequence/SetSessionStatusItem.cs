@@ -4,6 +4,7 @@ using NINA.Core.Model;
 using NINA.Core.Utility;
 using NINA.Sequencer.SequenceItem;
 using NINA.Sequencer.Validations;
+using Subframes.NinaPlugin;
 
 namespace Subframes.NinaPlugin.Sequence;
 
@@ -70,7 +71,7 @@ public partial class SetSessionStatusItem : SequenceItem, IValidatable
     {
         if (!_sessionService.HasActiveSession)
         {
-            Logger.Debug("[Subframes] SetSessionStatusItem: no active session — skipping.");
+            SubframesLogger.Debug("SetSessionStatusItem: no active session — skipping.");
             return;
         }
 
@@ -88,7 +89,7 @@ public partial class SetSessionStatusItem : SequenceItem, IValidatable
 
         await _sessionService.UpdateStatusAsync(status, waitReason, ct);
 
-        Logger.Info($"[Subframes] SetSessionStatusItem: status={status}" +
+        SubframesLogger.Info($"SetSessionStatusItem: status={status}" +
                     (waitReason is not null ? $" reason='{waitReason}'" : ""));
     }
 

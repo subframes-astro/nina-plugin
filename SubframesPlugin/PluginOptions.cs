@@ -117,7 +117,7 @@ public class PluginOptions
         }
         catch (Exception ex)
         {
-            Logger.Error($"[Subframes] Failed to load settings: {ex.Message}");
+            SubframesLogger.Error($"Failed to load settings: {ex.Message}");
         }
         var defaults = new PluginOptions { InstanceId = Guid.NewGuid().ToString() };
         defaults.Save();
@@ -135,7 +135,7 @@ public class PluginOptions
         }
         catch (Exception ex)
         {
-            Logger.Error($"[Subframes] Failed to save settings: {ex.Message}");
+            SubframesLogger.Error($"Failed to save settings: {ex.Message}");
         }
     }
 }

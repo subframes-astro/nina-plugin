@@ -153,9 +153,9 @@ public sealed class SessionService : IDisposable, IFocuserConsumer, IGuiderConsu
                 if (cached != null) break;
             }
             resolved = true;
-            Logger.Debug(cached != null
-                ? $"[Subframes] Reflection: found property '{cached.Name}' on {type.Name} for FWHM/Eccentricity."
-                : $"[Subframes] Reflection: no FWHM/Eccentricity property found on {type.Name} — fields will be null.");
+            SubframesLogger.Debug(cached != null
+                ? $"Reflection: found property '{cached.Name}' on {type.Name} for FWHM/Eccentricity."
+                : $"Reflection: no FWHM/Eccentricity property found on {type.Name} — fields will be null.");
         }
         if (cached == null) return null;
         var val = cached.GetValue(obj);
@@ -267,7 +267,7 @@ public sealed class SessionService : IDisposable, IFocuserConsumer, IGuiderConsu
 
         // Subscribe once; the handler fires for every saved image while NINA runs.
         _imageSaveMediator.ImageSaved += OnImageSaved;
-        Logger.Debug("[Subframes] SessionService subscribed to ImageSaved.");
+        SubframesLogger.Debug("SessionService subscribed to ImageSaved.");
     }
 
     /// <summary>
@@ -351,7 +351,7 @@ public sealed class SessionService : IDisposable, IFocuserConsumer, IGuiderConsu
         {
             // API unreachable — use local ID as fallback so frames can still be cached.
             // CacheReplayEngine will promote this session when connectivity returns.
-            Logger.Warning($"[Subframes] StartSession failed — caching locally as {localId} for later replay.");
+            SubframesLogger.Warning($"StartSession failed — caching locally as {localId} for later replay.");
         }
 
         // Use server ID when available; fall back to local ID for offline caching.
@@ -365,7 +365,7 @@ public sealed class SessionService : IDisposable, IFocuserConsumer, IGuiderConsu
 
         if (sessionId is not null)
         {
-            Logger.Info($"[Subframes] Session started: {sessionId} target='{request.TargetName}'");
+            SubframesLogger.Info($"Session started: {sessionId} target='{request.TargetName}'");
         }
         _isManualSession = true;
         // Store null when target name is empty or "Unknown Target" so
@@ -399,11 +399,11 @@ public sealed class SessionService : IDisposable, IFocuserConsumer, IGuiderConsu
         var localSessionId = _activeLocalSessionId;
         if (sessionId is null) return;
 
-        Logger.Debug($"[Subframes] Ending session: sessionId={sessionId} frameCount={_frameCounter}");
+        SubframesLogger.Debug($"Ending session: sessionId={sessionId} frameCount={_frameCounter}");
 
         // Flush any remaining cached frames before ending the session.
         try { await _syncEngine.FlushAsync(ct); }
-        catch (Exception ex) { Logger.Warning($"[Subframes] Pre-end flush failed: {ex.Message}"); }
+        catch (Exception ex) { SubframesLogger.Warning($"Pre-end flush failed: {ex.Message}"); }
 
         StopHeartbeatTimer();
         UnregisterSessionEventConsumers();
@@ -412,7 +412,7 @@ public sealed class SessionService : IDisposable, IFocuserConsumer, IGuiderConsu
         if (_activeSessionTargetId is not null)
         {
             try { await EndTargetAsync(ct); }
-            catch (Exception ex) { Logger.Warning($"[Subframes] EndTarget during session end failed: {ex.Message}"); }
+            catch (Exception ex) { SubframesLogger.Warning($"EndTarget during session end failed: {ex.Message}"); }
         }
 
         int? skipped = _trackingExposureYield ? _skippedExposures : null;
@@ -425,9 +425,9 @@ public sealed class SessionService : IDisposable, IFocuserConsumer, IGuiderConsu
         // Query TS for per-frame grading results and all-time progress before clearing state.
         var sessionEnd = DateTime.UtcNow;
         var tsGrading  = TsGradingReader.ReadGradingResults(_sessionStartTime, sessionEnd);
-        Logger.Info($"[Subframes] TS grading results: {tsGrading?.Count ?? 0} entry/entries.");
+        SubframesLogger.Info($"TS grading results: {tsGrading?.Count ?? 0} entry/entries.");
         var tsProgress = TsProgressReader.ReadProgress();
-        Logger.Info($"[Subframes] TS progress results: {tsProgress?.Count ?? 0} row(s).");
+        SubframesLogger.Info($"TS progress results: {tsProgress?.Count ?? 0} row(s).");
 
         _activeSessionId       = null;
         _activeLocalSessionId  = null;
@@ -439,13 +439,13 @@ public sealed class SessionService : IDisposable, IFocuserConsumer, IGuiderConsu
 
         if (tsGrading is { Count: > 0 })
         {
-            Logger.Info($"[Subframes] Sending {tsGrading.Count} TS grading entry/entries to API.");
+            SubframesLogger.Info($"Sending {tsGrading.Count} TS grading entry/entries to API.");
             await _apiClient.PostTsGradingAsync(sessionId, tsGrading, ct);
         }
 
         if (tsProgress is { Count: > 0 })
         {
-            Logger.Info($"[Subframes] Sending {tsProgress.Count} TS progress row(s) to API.");
+            SubframesLogger.Info($"Sending {tsProgress.Count} TS progress row(s) to API.");
             await _apiClient.PostTsProgressAsync(sessionId, tsProgress, ct);
         }
 
@@ -453,7 +453,7 @@ public sealed class SessionService : IDisposable, IFocuserConsumer, IGuiderConsu
         if (localSessionId is not null)
             _frameCache.MarkSessionReplayed(localSessionId);
 
-        Logger.Info("[Subframes] Session ended.");
+        SubframesLogger.Info("Session ended.");
         SessionEnded?.Invoke(this, EventArgs.Empty);
     }
 
@@ -466,7 +466,7 @@ public sealed class SessionService : IDisposable, IFocuserConsumer, IGuiderConsu
         _activeLocalSessionId = null;
         _activeSessionTargetId = null;
         _activeLocalTargetId   = null;
-        Logger.Info("[Subframes] Session cleared.");
+        SubframesLogger.Info("Session cleared.");
     }
 
     /// <summary>
@@ -521,7 +521,7 @@ public sealed class SessionService : IDisposable, IFocuserConsumer, IGuiderConsu
         // Skip the API call so the backend never receives a bogus 0,0 location.
         if (targetRa == 0 && targetDec == 0)
         {
-            Logger.Debug("[Subframes] StartTargetAsync skipped: RA=0/Dec=0 (no valid target coordinates).");
+            SubframesLogger.Debug("StartTargetAsync skipped: RA=0/Dec=0 (no valid target coordinates).");
             return null;
         }
 
@@ -556,11 +556,11 @@ public sealed class SessionService : IDisposable, IFocuserConsumer, IGuiderConsu
         if (targetId is not null)
         {
             _frameCache.MarkTargetAcked(localTargetId, targetId);
-            Logger.Info($"[Subframes] Target started: {targetId} name='{targetName}'");
+            SubframesLogger.Info($"Target started: {targetId} name='{targetName}'");
         }
         else
         {
-            Logger.Warning($"[Subframes] StartTarget failed — cached locally as {localTargetId} for replay.");
+            SubframesLogger.Warning($"StartTarget failed — cached locally as {localTargetId} for replay.");
         }
 
         return targetId;
@@ -664,13 +664,13 @@ public sealed class SessionService : IDisposable, IFocuserConsumer, IGuiderConsu
             && string.Equals(CatalogNameNormalizer.Normalize(_currentTarget), normalized, StringComparison.OrdinalIgnoreCase))
             return;
 
-        Logger.Info($"[Subframes] Target detected: '{normalized}' (was '{_currentTarget ?? "none"}')");
+        SubframesLogger.Info($"Target detected: '{normalized}' (was '{_currentTarget ?? "none"}')");
 
         // End current target if one is active.
         if (_activeSessionTargetId is not null)
         {
             try { await EndTargetAsync(CancellationToken.None); }
-            catch (Exception ex) { Logger.Warning($"[Subframes] EndTarget failed during target detection: {ex.Message}"); }
+            catch (Exception ex) { SubframesLogger.Warning($"EndTarget failed during target detection: {ex.Message}"); }
         }
 
         // Register the new target.
@@ -711,7 +711,7 @@ public sealed class SessionService : IDisposable, IFocuserConsumer, IGuiderConsu
             InstanceId     = string.IsNullOrWhiteSpace(_options.InstanceId) ? null : _options.InstanceId,
             InstanceName   = string.IsNullOrWhiteSpace(_options.InstanceName) ? null : _options.InstanceName,
         };
-        Logger.Debug($"[Subframes] Immediate heartbeat: sessionId={sessionId} target='{_currentTarget}'");
+        SubframesLogger.Debug($"Immediate heartbeat: sessionId={sessionId} target='{_currentTarget}'");
         _ = _apiClient.SendHeartbeatAsync(payload, CancellationToken.None);
     }
 
@@ -793,7 +793,7 @@ public sealed class SessionService : IDisposable, IFocuserConsumer, IGuiderConsu
                 StartHeartbeatTimer(activeId);
                 StartYieldPollTimer();
                 RegisterSessionEventConsumers();
-                Logger.Info($"[Subframes] Auto-session started on sequence start: sessionId={sessionId} target='{resolvedTarget}'");
+                SubframesLogger.Info($"Auto-session started on sequence start: sessionId={sessionId} target='{resolvedTarget}'");
             }
             else
             {
@@ -806,12 +806,12 @@ public sealed class SessionService : IDisposable, IFocuserConsumer, IGuiderConsu
                 StartHeartbeatTimer(activeId);
                 StartYieldPollTimer();
                 RegisterSessionEventConsumers();
-                Logger.Warning($"[Subframes] Auto-session offline: caching locally as {localId} for replay.");
+                SubframesLogger.Warning($"Auto-session offline: caching locally as {localId} for replay.");
             }
         }
         catch (Exception ex)
         {
-            Logger.Error($"[Subframes] Auto-session start on sequence start error: {ex.Message}");
+            SubframesLogger.Error($"Auto-session start on sequence start error: {ex.Message}");
         }
         finally
         {
@@ -856,7 +856,7 @@ public sealed class SessionService : IDisposable, IFocuserConsumer, IGuiderConsu
                 if (!string.IsNullOrEmpty(normalizedCurrent)
                     && !string.Equals(normalizedCurrent, targetName, StringComparison.OrdinalIgnoreCase))
                 {
-                    Logger.Info($"[Subframes] Auto-session boundary: target changed from '{_currentTarget}' to '{targetName}'");
+                    SubframesLogger.Info($"Auto-session boundary: target changed from '{_currentTarget}' to '{targetName}'");
                     _ = StartAutoSessionAsync(targetName, e, "target change");
                     return;
                 }
@@ -992,7 +992,7 @@ public sealed class SessionService : IDisposable, IFocuserConsumer, IGuiderConsu
                     Timestamp = capturedAt,
                     Metadata  = new Dictionary<string, object?> { ["from"] = lastFilter, ["to"] = filter },
                 });
-                Logger.Debug($"[Subframes] Filter change event: {lastFilter} → {filter}");
+                SubframesLogger.Debug($"Filter change event: {lastFilter} → {filter}");
             }
             if (filter != null) _lastEmittedFilter = filter;
 
@@ -1041,11 +1041,11 @@ public sealed class SessionService : IDisposable, IFocuserConsumer, IGuiderConsu
             // Fire-and-forget thumbnail — must not delay frame caching or imaging.
             _ = SendThumbnailAsync(sessionId, frameNumber, e);
 
-            Logger.Debug($"[Subframes] Frame cached: sessionId={sessionId} frameNumber={frameNumber} targetId={_activeSessionTargetId ?? "none"} filter={filter ?? "none"} hfr={hfr?.ToString("F2") ?? "n/a"}");
+            SubframesLogger.Debug($"Frame cached: sessionId={sessionId} frameNumber={frameNumber} targetId={_activeSessionTargetId ?? "none"} filter={filter ?? "none"} hfr={hfr?.ToString("F2") ?? "n/a"}");
         }
         catch (Exception ex)
         {
-            Logger.Error($"[Subframes] Unexpected error in PostFrameAsync: {ex.Message}");
+            SubframesLogger.Error($"Unexpected error in PostFrameAsync: {ex.Message}");
         }
 
         return Task.CompletedTask;
@@ -1064,7 +1064,7 @@ public sealed class SessionService : IDisposable, IFocuserConsumer, IGuiderConsu
             var bitmap = e.Image;
             if (bitmap is null)
             {
-                Logger.Debug($"[Subframes] SendThumbnail skipped: no bitmap (frame={frameNumber})");
+                SubframesLogger.Debug($"SendThumbnail skipped: no bitmap (frame={frameNumber})");
                 return;
             }
 
@@ -1092,7 +1092,7 @@ public sealed class SessionService : IDisposable, IFocuserConsumer, IGuiderConsu
         }
         catch (Exception ex)
         {
-            Logger.Warning($"[Subframes] SendThumbnail error (session={sessionId} frame={frameNumber}): {ex.Message}");
+            SubframesLogger.Warning($"SendThumbnail error (session={sessionId} frame={frameNumber}): {ex.Message}");
         }
     }
 
@@ -1116,7 +1116,7 @@ public sealed class SessionService : IDisposable, IFocuserConsumer, IGuiderConsu
             var existing = _activeSessionId;
             if (existing is not null && reason == "first frame")
             {
-                Logger.Info($"[Subframes] Auto-session already active ({existing}), posting frame instead of starting duplicate");
+                SubframesLogger.Info($"Auto-session already active ({existing}), posting frame instead of starting duplicate");
                 await PostFrameAsync(existing, e);
                 return;
             }
@@ -1173,15 +1173,15 @@ public sealed class SessionService : IDisposable, IFocuserConsumer, IGuiderConsu
             RegisterSessionEventConsumers();
 
             if (sessionId is not null)
-                Logger.Info($"[Subframes] Auto-session started: target='{targetName}' (trigger: {reason})");
+                SubframesLogger.Info($"Auto-session started: target='{targetName}' (trigger: {reason})");
             else
-                Logger.Warning($"[Subframes] Auto-session offline: caching locally as {localId} (trigger: {reason})");
+                SubframesLogger.Warning($"Auto-session offline: caching locally as {localId} (trigger: {reason})");
 
             await PostFrameAsync(activeId, e);
         }
         catch (Exception ex)
         {
-            Logger.Error($"[Subframes] Auto-session start error: {ex.Message}");
+            SubframesLogger.Error($"Auto-session start error: {ex.Message}");
         }
         finally
         {
@@ -1233,7 +1233,7 @@ public sealed class SessionService : IDisposable, IFocuserConsumer, IGuiderConsu
             }
             catch (Exception ex)
             {
-                Logger.Debug($"[Subframes] PollExposureYield: sequence item provider threw, disabling yield tracking. {ex.Message}");
+                SubframesLogger.Debug($"PollExposureYield: sequence item provider threw, disabling yield tracking. {ex.Message}");
                 _trackingExposureYield = false;
                 StopYieldPollTimer();
                 return;
@@ -1277,7 +1277,7 @@ public sealed class SessionService : IDisposable, IFocuserConsumer, IGuiderConsu
         }
         catch (Exception ex)
         {
-            Logger.Debug($"[Subframes] PollExposureYield error: {ex.Message}");
+            SubframesLogger.Debug($"PollExposureYield error: {ex.Message}");
         }
     }
 
@@ -1316,7 +1316,7 @@ public sealed class SessionService : IDisposable, IFocuserConsumer, IGuiderConsu
                         var idleMinutes = (DateTime.UtcNow - _lastFrameTime).TotalMinutes;
                         if (idleMinutes >= opts.SessionTimeoutMinutes)
                         {
-                            Logger.Info($"[Subframes] Auto-session ended: no frames for {(int)idleMinutes} minutes");
+                            SubframesLogger.Info($"Auto-session ended: no frames for {(int)idleMinutes} minutes");
                             await EndSessionAsync(CancellationToken.None);
                             return;
                         }
@@ -1331,7 +1331,7 @@ public sealed class SessionService : IDisposable, IFocuserConsumer, IGuiderConsu
                 }
                 catch (Exception ex)
                 {
-                    Logger.Debug($"[Subframes] Active target poll failed: {ex.Message}");
+                    SubframesLogger.Debug($"Active target poll failed: {ex.Message}");
                 }
 
                 var snap = _snapshot;
@@ -1349,7 +1349,7 @@ public sealed class SessionService : IDisposable, IFocuserConsumer, IGuiderConsu
                     InstanceId     = string.IsNullOrWhiteSpace(_options.InstanceId) ? null : _options.InstanceId,
                     InstanceName   = string.IsNullOrWhiteSpace(_options.InstanceName) ? null : _options.InstanceName,
                 };
-                Logger.Debug($"[Subframes] Heartbeat firing: sessionId={sessionId} frameCount={payload.ExposureCount} uptimeMin={payload.UptimeMinutes}");
+                SubframesLogger.Debug($"Heartbeat firing: sessionId={sessionId} frameCount={payload.ExposureCount} uptimeMin={payload.UptimeMinutes}");
                 // Fire-and-forget — never block the timer loop on a slow network.
                 _ = _apiClient.SendHeartbeatAsync(payload, CancellationToken.None);
             }
@@ -1360,7 +1360,7 @@ public sealed class SessionService : IDisposable, IFocuserConsumer, IGuiderConsu
         }
         catch (Exception ex)
         {
-            Logger.Error($"[Subframes] Heartbeat loop terminated unexpectedly: {ex.Message}");
+            SubframesLogger.Error($"Heartbeat loop terminated unexpectedly: {ex.Message}");
         }
     }
 
@@ -1376,42 +1376,42 @@ public sealed class SessionService : IDisposable, IFocuserConsumer, IGuiderConsu
         try
         {
             _focuserMediator?.RegisterConsumer(this);
-            Logger.Info("[Subframes] Registered as IFocuserConsumer — UpdateEndAutoFocusRun will be called by NINA after each autofocus run.");
+            SubframesLogger.Info("Registered as IFocuserConsumer — UpdateEndAutoFocusRun will be called by NINA after each autofocus run.");
         }
         catch (Exception ex)
         {
-            Logger.Warning($"[Subframes] Could not register as focuser consumer: {ex.Message}");
+            SubframesLogger.Warning($"Could not register as focuser consumer: {ex.Message}");
         }
 
         try
         {
             if (_telescopeMediator is not null)
                 _telescopeMediator.AfterMeridianFlip += OnAfterMeridianFlip;
-            Logger.Debug("[Subframes] Subscribed to AfterMeridianFlip event.");
+            SubframesLogger.Debug("Subscribed to AfterMeridianFlip event.");
         }
         catch (Exception ex)
         {
-            Logger.Warning($"[Subframes] Could not subscribe to AfterMeridianFlip: {ex.Message}");
+            SubframesLogger.Warning($"Could not subscribe to AfterMeridianFlip: {ex.Message}");
         }
 
         try
         {
             _guiderMediator?.RegisterConsumer(this);
-            Logger.Debug("[Subframes] Registered as IGuiderConsumer for guiding start/stop events.");
+            SubframesLogger.Debug("Registered as IGuiderConsumer for guiding start/stop events.");
         }
         catch (Exception ex)
         {
-            Logger.Warning($"[Subframes] Could not register as guider consumer: {ex.Message}");
+            SubframesLogger.Warning($"Could not register as guider consumer: {ex.Message}");
         }
 
         try
         {
             _safetyMonitorMediator?.RegisterConsumer(this);
-            Logger.Debug("[Subframes] Registered as ISafetyMonitorConsumer for safety events.");
+            SubframesLogger.Debug("Registered as ISafetyMonitorConsumer for safety events.");
         }
         catch (Exception ex)
         {
-            Logger.Warning($"[Subframes] Could not register as safety monitor consumer: {ex.Message}");
+            SubframesLogger.Warning($"Could not register as safety monitor consumer: {ex.Message}");
         }
     }
 
@@ -1465,11 +1465,11 @@ public sealed class SessionService : IDisposable, IFocuserConsumer, IGuiderConsu
                         DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull
                     });
                 _frameCache.InsertEvent(localId, json);
-                Logger.Debug($"[Subframes] Event cached (offline session): type={request.EventType}");
+                SubframesLogger.Debug($"Event cached (offline session): type={request.EventType}");
             }
             catch (Exception ex)
             {
-                Logger.Warning($"[Subframes] Failed to cache event: {ex.Message}");
+                SubframesLogger.Warning($"Failed to cache event: {ex.Message}");
             }
         }
     }
@@ -1498,12 +1498,12 @@ public sealed class SessionService : IDisposable, IFocuserConsumer, IGuiderConsu
                 Finite(autofocusInfo.Temperature),
                 (int)autofocusInfo.Position);
 
-            Logger.Info($"[Subframes] UpdateEndAutoFocusRun called: session={sessionId} filter={autofocusInfo.Filter} position={autofocusInfo.Position} — posting autofocus event");
+            SubframesLogger.Info($"UpdateEndAutoFocusRun called: session={sessionId} filter={autofocusInfo.Filter} position={autofocusInfo.Position} — posting autofocus event");
             PostOrCacheEvent(request);
         }
         catch (Exception ex)
         {
-            Logger.Warning($"[Subframes] UpdateEndAutoFocusRun failed: {ex.Message}");
+            SubframesLogger.Warning($"UpdateEndAutoFocusRun failed: {ex.Message}");
         }
     }
 
@@ -1542,11 +1542,11 @@ public sealed class SessionService : IDisposable, IFocuserConsumer, IGuiderConsu
                 EventType = eventType,
                 Timestamp = DateTime.UtcNow.ToString("o"),
             });
-            Logger.Debug($"[Subframes] {eventType} event queued: session={sessionId}");
+            SubframesLogger.Debug($"{eventType} event queued: session={sessionId}");
         }
         catch (Exception ex)
         {
-            Logger.Warning($"[Subframes] IGuiderConsumer.UpdateDeviceInfo failed: {ex.Message}");
+            SubframesLogger.Warning($"IGuiderConsumer.UpdateDeviceInfo failed: {ex.Message}");
         }
     }
 
@@ -1579,7 +1579,7 @@ public sealed class SessionService : IDisposable, IFocuserConsumer, IGuiderConsu
                 Timestamp = DateTime.UtcNow.ToString("o"),
                 Metadata  = new Dictionary<string, object?> { ["isSafe"] = nowSafe },
             });
-            Logger.Debug($"[Subframes] {eventType} event queued: session={sessionId} isSafe={nowSafe}");
+            SubframesLogger.Debug($"{eventType} event queued: session={sessionId} isSafe={nowSafe}");
 
             // Reset the inactivity timer on every safety transition.
             // Without this, a long unsafe period (no frames captured) causes the
@@ -1589,7 +1589,7 @@ public sealed class SessionService : IDisposable, IFocuserConsumer, IGuiderConsu
         }
         catch (Exception ex)
         {
-            Logger.Warning($"[Subframes] ISafetyMonitorConsumer.UpdateDeviceInfo failed: {ex.Message}");
+            SubframesLogger.Warning($"ISafetyMonitorConsumer.UpdateDeviceInfo failed: {ex.Message}");
         }
     }
 
@@ -1614,11 +1614,11 @@ public sealed class SessionService : IDisposable, IFocuserConsumer, IGuiderConsu
                 Metadata  = new Dictionary<string, object?> { ["success"] = e.Success },
             };
             PostOrCacheEvent(request);
-            Logger.Debug($"[Subframes] Meridian flip event queued: session={sessionId} success={e.Success}");
+            SubframesLogger.Debug($"Meridian flip event queued: session={sessionId} success={e.Success}");
         }
         catch (Exception ex)
         {
-            Logger.Warning($"[Subframes] OnAfterMeridianFlip failed: {ex.Message}");
+            SubframesLogger.Warning($"OnAfterMeridianFlip failed: {ex.Message}");
         }
         return Task.CompletedTask;
     }
@@ -1629,6 +1629,6 @@ public sealed class SessionService : IDisposable, IFocuserConsumer, IGuiderConsu
         UnregisterSessionEventConsumers();
         _imageSaveMediator.ImageSaved -= OnImageSaved;
         _apiClient.Dispose();
-        Logger.Debug("[Subframes] SessionService disposed.");
+        SubframesLogger.Debug("SessionService disposed.");
     }
 }

@@ -1,6 +1,7 @@
 using System.Text.Json;
 using NINA.Core.Utility;
 using Subframes.NinaPlugin.Api;
+using Subframes.NinaPlugin;
 
 namespace Subframes.NinaPlugin.Data;
 
@@ -38,7 +39,7 @@ public sealed class SyncEngine : IDisposable
         var cts = new CancellationTokenSource();
         _cts = cts;
         _syncTask = RunSyncLoopAsync(cts.Token);
-        Logger.Info("[Subframes] SyncEngine started.");
+        SubframesLogger.Info("SyncEngine started.");
     }
 
     /// <summary>Stop the background sync loop.</summary>
@@ -85,7 +86,7 @@ public sealed class SyncEngine : IDisposable
         }
         catch (Exception ex)
         {
-            Logger.Error($"[Subframes] SyncEngine loop terminated unexpectedly: {ex.Message}");
+            SubframesLogger.Error($"SyncEngine loop terminated unexpectedly: {ex.Message}");
         }
     }
 
@@ -98,7 +99,7 @@ public sealed class SyncEngine : IDisposable
             var pending = _cache.GetPendingFrames(50);
             if (pending.Count == 0) return;
 
-            Logger.Debug($"[Subframes] SyncEngine: {pending.Count} pending frames to sync");
+            SubframesLogger.Debug($"SyncEngine: {pending.Count} pending frames to sync");
 
             // Group by session for batch upload.
             var bySession = pending
@@ -125,7 +126,7 @@ public sealed class SyncEngine : IDisposable
                     }
                     catch (JsonException ex)
                     {
-                        Logger.Warning($"[Subframes] SyncEngine: corrupt frame json id={id}: {ex.Message}");
+                        SubframesLogger.Warning($"SyncEngine: corrupt frame json id={id}: {ex.Message}");
                         _cache.MarkFailed([id], $"JSON parse error: {ex.Message}");
                     }
                 }
@@ -138,7 +139,7 @@ public sealed class SyncEngine : IDisposable
                     if (result is not null)
                     {
                         _cache.MarkSynced(frameIds);
-                        Logger.Info($"[Subframes] SyncEngine: synced {frameIds.Count} frames for session {sessionId} (accepted={result.Accepted})");
+                        SubframesLogger.Info($"SyncEngine: synced {frameIds.Count} frames for session {sessionId} (accepted={result.Accepted})");
                     }
                     else
                     {
@@ -152,7 +153,7 @@ public sealed class SyncEngine : IDisposable
                 catch (Exception ex)
                 {
                     _cache.MarkFailed(frameIds, ex.Message);
-                    Logger.Warning($"[Subframes] SyncEngine: batch sync failed for session {sessionId}: {ex.Message}");
+                    SubframesLogger.Warning($"SyncEngine: batch sync failed for session {sessionId}: {ex.Message}");
                 }
             }
         }
@@ -162,7 +163,7 @@ public sealed class SyncEngine : IDisposable
         }
         catch (Exception ex)
         {
-            Logger.Error($"[Subframes] SyncEngine: unexpected error during sync pass: {ex.Message}");
+            SubframesLogger.Error($"SyncEngine: unexpected error during sync pass: {ex.Message}");
         }
     }
 

@@ -21,23 +21,23 @@ internal static class TimezoneHelper
             if (TimeZoneInfo.TryConvertWindowsIdToIanaId(windowsId, out var ianaId)
                 && !string.IsNullOrEmpty(ianaId))
             {
-                Logger.Debug($"[Subframes] Resolved IANA timezone: '{ianaId}' (Windows ID: '{windowsId}')");
+                SubframesLogger.Debug($"Resolved IANA timezone: '{ianaId}' (Windows ID: '{windowsId}')");
                 return ianaId;
             }
 
             // On Linux/macOS NINA builds the ID is already IANA — return it directly.
             if (windowsId.Contains('/'))
             {
-                Logger.Debug($"[Subframes] Timezone ID appears to be IANA already: '{windowsId}'");
+                SubframesLogger.Debug($"Timezone ID appears to be IANA already: '{windowsId}'");
                 return windowsId;
             }
 
-            Logger.Warning($"[Subframes] Could not convert Windows timezone '{windowsId}' to IANA — sending empty string.");
+            SubframesLogger.Warning($"Could not convert Windows timezone '{windowsId}' to IANA — sending empty string.");
             return string.Empty;
         }
         catch (Exception ex)
         {
-            Logger.Warning($"[Subframes] ResolveIanaTimezone failed: {ex.Message} — sending empty string.");
+            SubframesLogger.Warning($"ResolveIanaTimezone failed: {ex.Message} — sending empty string.");
             return string.Empty;
         }
     }
