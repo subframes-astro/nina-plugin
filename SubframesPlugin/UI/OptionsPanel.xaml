@@ -29,18 +29,6 @@
                 VerticalAlignment="Center" />
         </StackPanel>
 
-        <!-- Debug logging toggle -->
-        <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
-            <TextBlock
-                Text="Debug:"
-                VerticalAlignment="Center"
-                Margin="0,0,6,0"
-                Foreground="{DynamicResource PrimaryBrush}" />
-            <CheckBox
-                IsChecked="{Binding IsDebugEnabled, Mode=TwoWay}"
-                VerticalAlignment="Center" />
-        </StackPanel>
-
         <!-- API Base URL -->
         <TextBlock
             Text="API Base URL"

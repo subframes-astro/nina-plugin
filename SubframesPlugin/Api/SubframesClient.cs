@@ -55,15 +55,12 @@ public sealed class SubframesClient : IDisposable
                 request.Headers.Authorization =
                     new AuthenticationHeaderValue("Bearer", key);
 
-                if (_options.IsDebugEnabled)
-                {
-                    var preview = key.Length > 12 ? key[..12] + "..." : "(short key)";
-                    Logger.Info($"[Subframes] Auth header set: Bearer {preview}");
-                }
+                var preview = key.Length > 12 ? key[..12] + "..." : "(short key)";
+                Logger.Debug($"[Subframes] Auth header set: Bearer {preview}");
             }
-            else if (_options.IsDebugEnabled)
+            else
             {
-                Logger.Info("[Subframes] No API key configured — request will be unauthenticated");
+                Logger.Debug("[Subframes] No API key configured — request will be unauthenticated");
             }
 
             return base.SendAsync(request, ct);
@@ -213,8 +210,7 @@ public sealed class SubframesClient : IDisposable
         {
             var url = $"{BaseUrl}/api/v1/ingest/session/start";
             var jsonBytes = SerializeJson(request);
-            if (_options.IsDebugEnabled)
-                Logger.Info($"[Subframes] POST {url} body={System.Text.Encoding.UTF8.GetString(jsonBytes)}");
+            Logger.Debug($"[Subframes] POST {url} body={System.Text.Encoding.UTF8.GetString(jsonBytes)}");
 
             using var response = await PostWithRetryAsync(url, jsonBytes, ct);
             if (!response.IsSuccessStatusCode)
@@ -265,8 +261,7 @@ public sealed class SubframesClient : IDisposable
                 FailedExposures = failedExposures,
             };
             var jsonBytes = SerializeJson(body);
-            if (_options.IsDebugEnabled)
-                Logger.Info($"[Subframes] POST {url} body={System.Text.Encoding.UTF8.GetString(jsonBytes)}");
+            Logger.Debug($"[Subframes] POST {url} body={System.Text.Encoding.UTF8.GetString(jsonBytes)}");
 
             using var response = await PostWithRetryAsync(url, jsonBytes, ct);
             response.EnsureSuccessStatusCode();
@@ -296,8 +291,7 @@ public sealed class SubframesClient : IDisposable
         {
             var url = $"{BaseUrl}/api/v1/ingest/session/target/start";
             var jsonBytes = SerializeJson(request);
-            if (_options.IsDebugEnabled)
-                Logger.Info($"[Subframes] POST {url} body={System.Text.Encoding.UTF8.GetString(jsonBytes)}");
+            Logger.Debug($"[Subframes] POST {url} body={System.Text.Encoding.UTF8.GetString(jsonBytes)}");
 
             using var response = await PostWithRetryAsync(url, jsonBytes, ct);
 
@@ -343,8 +337,7 @@ public sealed class SubframesClient : IDisposable
         {
             var url = $"{BaseUrl}/api/v1/ingest/session/target/end";
             var jsonBytes = SerializeJson(request);
-            if (_options.IsDebugEnabled)
-                Logger.Info($"[Subframes] POST {url} body={System.Text.Encoding.UTF8.GetString(jsonBytes)}");
+            Logger.Debug($"[Subframes] POST {url} body={System.Text.Encoding.UTF8.GetString(jsonBytes)}");
 
             using var response = await PostWithRetryAsync(url, jsonBytes, ct);
 
@@ -380,8 +373,7 @@ public sealed class SubframesClient : IDisposable
         {
             var url = $"{BaseUrl}/api/v1/ingest/session/status";
             var jsonBytes = SerializeJson(request);
-            if (_options.IsDebugEnabled)
-                Logger.Info($"[Subframes] POST {url} body={System.Text.Encoding.UTF8.GetString(jsonBytes)}");
+            Logger.Debug($"[Subframes] POST {url} body={System.Text.Encoding.UTF8.GetString(jsonBytes)}");
 
             using var response = await PostWithRetryAsync(url, jsonBytes, ct);
 
@@ -420,8 +412,7 @@ public sealed class SubframesClient : IDisposable
         try
         {
             var url = $"{BaseUrl}/api/v1/ingest/heartbeat";
-            if (_options.IsDebugEnabled)
-                Logger.Info($"[Subframes] POST {url} body={JsonSerializer.Serialize(request, JsonOptions)}");
+            Logger.Debug($"[Subframes] POST {url} body={JsonSerializer.Serialize(request, JsonOptions)}");
             using var response = await _http.PostAsJsonAsync(url, request, JsonOptions, cts.Token);
             response.EnsureSuccessStatusCode();
             Logger.Debug($"[Subframes] Heartbeat sent for session {request.SessionId}");
@@ -455,8 +446,7 @@ public sealed class SubframesClient : IDisposable
         try
         {
             var url = $"{BaseUrl}/api/v1/ingest/station/heartbeat";
-            if (_options.IsDebugEnabled)
-                Logger.Info($"[Subframes] POST {url} body={JsonSerializer.Serialize(request, JsonOptions)}");
+            Logger.Debug($"[Subframes] POST {url} body={JsonSerializer.Serialize(request, JsonOptions)}");
             using var response = await _http.PostAsJsonAsync(url, request, JsonOptions, cts.Token);
             if (!response.IsSuccessStatusCode)
             {
@@ -464,10 +454,7 @@ public sealed class SubframesClient : IDisposable
                 Logger.Warning($"[Subframes] Station heartbeat failed: {(int)response.StatusCode} {response.ReasonPhrase} — {body}");
                 return;
             }
-            if (_options.IsDebugEnabled)
-                Logger.Info($"[Subframes] Station heartbeat accepted: {(int)response.StatusCode} (status={request.Status})");
-            else
-                Logger.Debug($"[Subframes] Station heartbeat sent (status={request.Status})");
+            Logger.Debug($"[Subframes] Station heartbeat sent (status={request.Status})");
         }
         catch (OperationCanceledException)
         {
@@ -501,8 +488,7 @@ public sealed class SubframesClient : IDisposable
                 Frames = frames
             };
             var jsonBytes = SerializeJson(body);
-            if (_options.IsDebugEnabled)
-                Logger.Info($"[Subframes] POST {url} body={System.Text.Encoding.UTF8.GetString(jsonBytes)}");
+            Logger.Debug($"[Subframes] POST {url} body={System.Text.Encoding.UTF8.GetString(jsonBytes)}");
 
             using var response = await PostWithRetryAsync(url, jsonBytes, ct);
             response.EnsureSuccessStatusCode();
@@ -563,8 +549,8 @@ public sealed class SubframesClient : IDisposable
 
             if (!response.IsSuccessStatusCode)
                 Logger.Warning($"[Subframes] UploadThumbnail HTTP {(int)response.StatusCode}");
-            else if (_options.IsDebugEnabled)
-                Logger.Info($"[Subframes] Thumbnail uploaded: sessionId={sessionId} frameNumber={frameNumber} size={jpeg.Length}B");
+            else
+                Logger.Debug($"[Subframes] Thumbnail uploaded: sessionId={sessionId} frameNumber={frameNumber} size={jpeg.Length}B");
         }
         catch (OperationCanceledException)
         {
@@ -681,8 +667,7 @@ public sealed class SubframesClient : IDisposable
             var url = $"{BaseUrl}/api/v1/ingest/session/{sessionId}/ts-grading";
             var body = new TsGradingRequest { Entries = entries };
             var jsonBytes = SerializeJson(body);
-            if (_options.IsDebugEnabled)
-                Logger.Info($"[Subframes] POST {url} entries={entries.Count}");
+            Logger.Debug($"[Subframes] POST {url} entries={entries.Count}");
 
             using var response = await PostWithRetryAsync(url, jsonBytes, ct);
 
@@ -724,8 +709,7 @@ public sealed class SubframesClient : IDisposable
             var url = $"{BaseUrl}/api/v1/ingest/session/{sessionId}/ts-progress";
             var body = new TsProgressRequest { Entries = entries };
             var jsonBytes = SerializeJson(body);
-            if (_options.IsDebugEnabled)
-                Logger.Info($"[Subframes] POST {url} entries={entries.Count}");
+            Logger.Debug($"[Subframes] POST {url} entries={entries.Count}");
 
             using var response = await PostWithRetryAsync(url, jsonBytes, ct);
 
@@ -772,8 +756,7 @@ public sealed class SubframesClient : IDisposable
         {
             var url = $"{BaseUrl}/api/v1/ingest/event";
             var jsonBytes = SerializeJson(request);
-            if (_options.IsDebugEnabled)
-                Logger.Info($"[Subframes] POST {url} body={System.Text.Encoding.UTF8.GetString(jsonBytes)}");
+            Logger.Debug($"[Subframes] POST {url} body={System.Text.Encoding.UTF8.GetString(jsonBytes)}");
 
             using var response = await _http.PostAsync(url, CreateJsonContent(jsonBytes), cts.Token);
 

@@ -30,9 +30,6 @@ public class PluginOptions
     /// <summary>Whether to send data to the API (can be toggled in the UI).</summary>
     public bool IsEnabled { get; set; } = true;
 
-    /// <summary>When true, logs prepared JSON payloads and session lifecycle events at Debug level.</summary>
-    public bool IsDebugEnabled { get; set; } = false;
-
     /// <summary>Stable identifier for this NINA instance, auto-generated on first run.</summary>
     public string InstanceId { get; set; } = string.Empty;
 
