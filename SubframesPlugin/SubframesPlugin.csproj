@@ -83,6 +83,13 @@
          winsqlite3.dll (Win 8.1+) and avoid distributing a native e_sqlite3.dll. -->
     <PackageReference Include="Microsoft.Data.Sqlite.Core" Version="8.*" />
     <PackageReference Include="SQLitePCLRaw.bundle_winsqlite3" Version="2.*" />
+    <!-- NLog is used by SubframesLogger to add a dedicated Subframes debug log file.
+         NINA ships NLog in its own directory and loads it at runtime via its assembly
+         resolver.  We exclude the runtime asset so it is NOT copied into the plugin
+         output folder — this avoids version conflicts with NINA's own copy. -->
+    <PackageReference Include="NLog" Version="5.*">
+      <ExcludeAssets>runtime</ExcludeAssets>
+    </PackageReference>
   </ItemGroup>
 
   <!-- Assembly attributes consumed by NINA's PluginBase to populate manifest metadata -->
