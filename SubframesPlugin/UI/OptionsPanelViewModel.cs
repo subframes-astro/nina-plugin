@@ -6,6 +6,7 @@ using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using NINA.Core.Utility;
 using Subframes.NinaPlugin.Api;
+using Subframes.NinaPlugin;
 
 namespace Subframes.NinaPlugin.UI;
 
@@ -132,7 +133,7 @@ public partial class OptionsPanelViewModel : ObservableObject
         _options.TsDatabasePath = TsDatabasePath.Trim();
         _options.Save();
         _plugin.ApplyOptionsChange();
-        Logger.Info($"[Subframes] Settings saved — API URL: {_options.ApiBaseUrl}  Enabled: {_options.IsEnabled}");
+        SubframesLogger.Info($"Settings saved — API URL: {_options.ApiBaseUrl}  Enabled: {_options.IsEnabled}");
     }
 
     // ── Auto-save callbacks ───────────────────────────────────────────────────
@@ -190,7 +191,7 @@ public partial class OptionsPanelViewModel : ObservableObject
             {
                 ApiStatusText = "Disconnected";
                 ApiStatusBrush = FrozenBrush(Color.FromRgb(0xEF, 0x44, 0x44)); // red
-                Logger.Warning($"[Subframes] API health check failed: {trimmedUrl} — {healthDetail}");
+                SubframesLogger.Warning($"API health check failed: {trimmedUrl} — {healthDetail}");
                 return;
             }
 
@@ -198,7 +199,7 @@ public partial class OptionsPanelViewModel : ObservableObject
             {
                 ApiStatusText = "Connected (no API key)";
                 ApiStatusBrush = FrozenBrush(Color.FromRgb(0x22, 0xC5, 0x5E)); // green
-                Logger.Info($"[Subframes] API health check passed (no API key): {trimmedUrl}");
+                SubframesLogger.Info($"API health check passed (no API key): {trimmedUrl}");
                 return;
             }
 
@@ -209,29 +210,29 @@ public partial class OptionsPanelViewModel : ObservableObject
                 ApiStatusText = "Connected";
                 ApiStatusBrush = FrozenBrush(Color.FromRgb(0x22, 0xC5, 0x5E)); // green
                 if (keyDetail == "Endpoint not available")
-                    Logger.Info($"[Subframes] Connected: {trimmedUrl} — key validation endpoint not deployed, key will be verified on first API call");
+                    SubframesLogger.Info($"Connected: {trimmedUrl} — key validation endpoint not deployed, key will be verified on first API call");
                 else
-                    Logger.Info($"[Subframes] Connected (key verified): {trimmedUrl}");
+                    SubframesLogger.Info($"Connected (key verified): {trimmedUrl}");
             }
             else if (keyDetail == "Invalid API key")
             {
                 ApiStatusText = "Invalid API Key";
                 ApiStatusBrush = FrozenBrush(Color.FromRgb(0xF5, 0x9E, 0x0B)); // amber
                 var keyPreview = trimmedKey.Length > 12 ? trimmedKey[..12] + "..." : "(short key)";
-                Logger.Warning($"[Subframes] API key invalid: {trimmedUrl} (key starts with '{keyPreview}')");
+                SubframesLogger.Warning($"API key invalid: {trimmedUrl} (key starts with '{keyPreview}')");
             }
             else
             {
                 ApiStatusText = "Key validation failed";
                 ApiStatusBrush = FrozenBrush(Color.FromRgb(0xEF, 0x44, 0x44)); // red
-                Logger.Error($"[Subframes] API key validation error: {trimmedUrl} — {keyDetail}");
+                SubframesLogger.Error($"API key validation error: {trimmedUrl} — {keyDetail}");
             }
         }
         catch (Exception ex)
         {
             ApiStatusText = "Error";
             ApiStatusBrush = FrozenBrush(Color.FromRgb(0xEF, 0x44, 0x44)); // red
-            Logger.Error($"[Subframes] API connection check error: {ex.Message}");
+            SubframesLogger.Error($"API connection check error: {ex.Message}");
         }
         finally
         {

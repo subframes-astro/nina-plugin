@@ -54,7 +54,7 @@ internal sealed class TsPreviewClient
                 .ToList();
 
             if (result.Count == 0)
-                Logger.Warning($"[Subframes] TsPreviewClient.FetchProfilesAsync: TS returned an empty profiles list (port={_port}).");
+                SubframesLogger.Warning($"TsPreviewClient.FetchProfilesAsync: TS returned an empty profiles list (port={_port}).");
 
             return result;
         }
@@ -64,7 +64,7 @@ internal sealed class TsPreviewClient
         }
         catch (Exception ex)
         {
-            Logger.Warning($"[Subframes] TsPreviewClient.FetchProfilesAsync failed: {ex.GetType().Name}: {ex.Message}");
+            SubframesLogger.Warning($"TsPreviewClient.FetchProfilesAsync failed: {ex.GetType().Name}: {ex.Message}");
             return [];
         }
     }
@@ -82,12 +82,12 @@ internal sealed class TsPreviewClient
 
             // Log the raw JSON so we can diagnose incomplete schedule issues
             // (e.g. TS returning 2 blocks instead of the expected 7).
-            Logger.Debug($"[Subframes] TsPreviewClient.FetchPreviewAsync raw response ({json.Length} chars): {(json.Length <= 4000 ? json : json[..4000] + "...(truncated)")}");
+            SubframesLogger.Debug($"TsPreviewClient.FetchPreviewAsync raw response ({json.Length} chars): {(json.Length <= 4000 ? json : json[..4000] + "...(truncated)")}");
 
             var rawBlocks = JsonSerializer.Deserialize<List<TsPreviewBlockRaw>>(json, _jsonOptions);
             if (rawBlocks is null) return null;
 
-            Logger.Debug($"[Subframes] TsPreviewClient.FetchPreviewAsync: deserialized {rawBlocks.Count} raw blocks for profile '{profileName}'.");
+            SubframesLogger.Debug($"TsPreviewClient.FetchPreviewAsync: deserialized {rawBlocks.Count} raw blocks for profile '{profileName}'.");
 
             // Collect distinct target names from non-wait-period blocks for coordinate enrichment.
             // We match by name (not ID) because the TS preview HTTP API returns runtime GUIDs
@@ -106,7 +106,7 @@ internal sealed class TsPreviewClient
             // so this guard is purely defensive against malformed data.
             var missingTimeBlocks = rawBlocks.Where(b => b.StartTime is null || b.EndTime is null).ToList();
             if (missingTimeBlocks.Count > 0)
-                Logger.Warning($"[Subframes] TsPreviewClient.FetchPreviewAsync: {missingTimeBlocks.Count} block(s) dropped due to missing StartTime/EndTime: {string.Join(", ", missingTimeBlocks.Select(b => $"'{b.Name ?? "(null)"}' wait={b.WaitPeriod}"))}");
+                SubframesLogger.Warning($"TsPreviewClient.FetchPreviewAsync: {missingTimeBlocks.Count} block(s) dropped due to missing StartTime/EndTime: {string.Join(", ", missingTimeBlocks.Select(b => $"'{b.Name ?? "(null)"}' wait={b.WaitPeriod}"))}");
 
             var blocks = rawBlocks
                 .Where(b => b.StartTime is not null && b.EndTime is not null)
@@ -158,7 +158,7 @@ internal sealed class TsPreviewClient
         }
         catch (Exception ex)
         {
-            Logger.Warning($"[Subframes] TsPreviewClient.FetchPreviewAsync failed for profile '{profileName}' ({profileId}): {ex.GetType().Name}: {ex.Message}");
+            SubframesLogger.Warning($"TsPreviewClient.FetchPreviewAsync failed for profile '{profileName}' ({profileId}): {ex.GetType().Name}: {ex.Message}");
             return null;
         }
     }
@@ -176,7 +176,7 @@ internal sealed class TsPreviewClient
             var dbPath = TsHelper.GetTsDbPath();
             if (!File.Exists(dbPath))
             {
-                Logger.Info($"[Subframes] TsPreviewClient.LookupCoordinatesByName: TS database not found at {dbPath}");
+                SubframesLogger.Info($"TsPreviewClient.LookupCoordinatesByName: TS database not found at {dbPath}");
                 return [];
             }
 
@@ -214,7 +214,7 @@ internal sealed class TsPreviewClient
         }
         catch (Exception ex)
         {
-            Logger.Warning($"[Subframes] TsPreviewClient.LookupCoordinatesByName failed: {ex.GetType().Name}: {ex.Message}");
+            SubframesLogger.Warning($"TsPreviewClient.LookupCoordinatesByName failed: {ex.GetType().Name}: {ex.Message}");
             return [];
         }
     }

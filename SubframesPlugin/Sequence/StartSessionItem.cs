@@ -88,7 +88,7 @@ public partial class StartSessionItem : SequenceItem, IValidatable
                 resolvedName = tName;
                 resolvedRa   = tRa;
                 resolvedDec  = tDec;
-                Logger.Info($"[Subframes] Resolved target from sequence tree: '{resolvedName}' RA={resolvedRa:F4} Dec={resolvedDec:F4}");
+                SubframesLogger.Info($"Resolved target from sequence tree: '{resolvedName}' RA={resolvedRa:F4} Dec={resolvedDec:F4}");
             }
         }
 
@@ -128,7 +128,7 @@ public partial class StartSessionItem : SequenceItem, IValidatable
         }
         catch (Exception ex)
         {
-            Logger.Warning($"[Subframes] Could not read camera info for session start: {ex.Message}");
+            SubframesLogger.Warning($"Could not read camera info for session start: {ex.Message}");
         }
 
         double? focalLengthMm = null;
@@ -139,14 +139,14 @@ public partial class StartSessionItem : SequenceItem, IValidatable
         }
         catch (Exception ex)
         {
-            Logger.Warning($"[Subframes] Could not read focal length for session start: {ex.Message}");
+            SubframesLogger.Warning($"Could not read focal length for session start: {ex.Message}");
         }
 
         var plannedTargets = TsPlannedTargetReader.ReadPlannedTargets();
         if (plannedTargets is not null)
-            Logger.Info($"[Subframes] Including {plannedTargets.Count} planned target(s) from Target Scheduler in session start");
+            SubframesLogger.Info($"Including {plannedTargets.Count} planned target(s) from Target Scheduler in session start");
         else
-            Logger.Info("[Subframes] No Target Scheduler planned targets to include in session start");
+            SubframesLogger.Info("No Target Scheduler planned targets to include in session start");
 
         var timezone = ResolveIanaTimezone();
 
@@ -174,7 +174,7 @@ public partial class StartSessionItem : SequenceItem, IValidatable
 
         if (sessionId is not null)
         {
-            Logger.Info($"[Subframes] StartSessionItem complete — session {sessionId}");
+            SubframesLogger.Info($"StartSessionItem complete — session {sessionId}");
             progress.Report(new ApplicationStatus
             {
                 Status = $"Subframes: session {sessionId} open."
@@ -183,7 +183,7 @@ public partial class StartSessionItem : SequenceItem, IValidatable
         else
         {
             // Do NOT throw — a failure here must not abort the imaging sequence.
-            Logger.Warning("[Subframes] StartSessionItem: session could not be created (API unreachable?). Continuing sequence.");
+            SubframesLogger.Warning("StartSessionItem: session could not be created (API unreachable?). Continuing sequence.");
             progress.Report(new ApplicationStatus
             {
                 Status = "Subframes: could not start session — check API URL and API key in plugin settings."
@@ -217,7 +217,7 @@ public partial class StartSessionItem : SequenceItem, IValidatable
         }
         catch (Exception ex)
         {
-            Logger.Debug($"[Subframes] Could not resolve target from sequence tree: {ex.Message}");
+            SubframesLogger.Debug($"Could not resolve target from sequence tree: {ex.Message}");
             return null;
         }
     }

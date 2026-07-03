@@ -3,6 +3,7 @@ using System.Text.Json;
 using Microsoft.Data.Sqlite;
 using NINA.Core.Utility;
 using Subframes.NinaPlugin.Api;
+using Subframes.NinaPlugin;
 
 namespace Subframes.NinaPlugin.Data;
 
@@ -125,12 +126,12 @@ public sealed class FrameCache : IDisposable
             cmd.Parameters.AddWithValue("$sessionId", sessionId);
             cmd.Parameters.AddWithValue("$frameJson", json);
             var id = (long)cmd.ExecuteScalar()!;
-            Logger.Debug($"[Subframes] Frame cached: id={id} session={sessionId}");
+            SubframesLogger.Debug($"Frame cached: id={id} session={sessionId}");
             return id;
         }
         catch (Exception ex)
         {
-            Logger.Error($"[Subframes] Failed to cache frame: {ex.Message}");
+            SubframesLogger.Error($"Failed to cache frame: {ex.Message}");
             return -1;
         }
     }
@@ -169,7 +170,7 @@ public sealed class FrameCache : IDisposable
         }
         catch (Exception ex)
         {
-            Logger.Error($"[Subframes] Failed to read pending frames: {ex.Message}");
+            SubframesLogger.Error($"Failed to read pending frames: {ex.Message}");
         }
         return results;
     }
@@ -198,7 +199,7 @@ public sealed class FrameCache : IDisposable
         }
         catch (Exception ex)
         {
-            Logger.Error($"[Subframes] Failed to mark frames synced: {ex.Message}");
+            SubframesLogger.Error($"Failed to mark frames synced: {ex.Message}");
         }
     }
 
@@ -228,7 +229,7 @@ public sealed class FrameCache : IDisposable
         }
         catch (Exception ex)
         {
-            Logger.Error($"[Subframes] Failed to mark frames failed: {ex.Message}");
+            SubframesLogger.Error($"Failed to mark frames failed: {ex.Message}");
         }
     }
 
@@ -246,12 +247,12 @@ public sealed class FrameCache : IDisposable
             cmd.Parameters.AddWithValue("$offset", $"-{retentionHours} hours");
             var deleted = cmd.ExecuteNonQuery();
             if (deleted > 0)
-                Logger.Info($"[Subframes] Pruned {deleted} synced frames older than {retentionHours}h");
+                SubframesLogger.Info($"Pruned {deleted} synced frames older than {retentionHours}h");
             return deleted;
         }
         catch (Exception ex)
         {
-            Logger.Error($"[Subframes] Failed to prune synced frames: {ex.Message}");
+            SubframesLogger.Error($"Failed to prune synced frames: {ex.Message}");
             return 0;
         }
     }
@@ -267,7 +268,7 @@ public sealed class FrameCache : IDisposable
         }
         catch (Exception ex)
         {
-            Logger.Error($"[Subframes] Failed to count pending frames: {ex.Message}");
+            SubframesLogger.Error($"Failed to count pending frames: {ex.Message}");
             return 0;
         }
     }
@@ -275,7 +276,7 @@ public sealed class FrameCache : IDisposable
     public void Dispose()
     {
         try { _conn.Dispose(); }
-        catch (Exception ex) { Logger.Warning($"[Subframes] FrameCache dispose error: {ex.Message}"); }
+        catch (Exception ex) { SubframesLogger.Warning($"FrameCache dispose error: {ex.Message}"); }
     }
 
     // ── Session reconciliation ────────────────────────────────────────────────
@@ -302,7 +303,7 @@ public sealed class FrameCache : IDisposable
         }
         catch (Exception ex)
         {
-            Logger.Error($"[Subframes] InsertSession failed: {ex.Message}");
+            SubframesLogger.Error($"InsertSession failed: {ex.Message}");
         }
     }
 
@@ -337,11 +338,11 @@ public sealed class FrameCache : IDisposable
             cmd.ExecuteNonQuery();
 
             tx.Commit();
-            Logger.Debug($"[Subframes] Session acked: local={localId} server={serverId}");
+            SubframesLogger.Debug($"Session acked: local={localId} server={serverId}");
         }
         catch (Exception ex)
         {
-            Logger.Error($"[Subframes] MarkSessionAcked failed: {ex.Message}");
+            SubframesLogger.Error($"MarkSessionAcked failed: {ex.Message}");
         }
     }
 
@@ -365,7 +366,7 @@ public sealed class FrameCache : IDisposable
         }
         catch (Exception ex)
         {
-            Logger.Error($"[Subframes] MarkSessionEnded failed: {ex.Message}");
+            SubframesLogger.Error($"MarkSessionEnded failed: {ex.Message}");
         }
     }
 
@@ -383,7 +384,7 @@ public sealed class FrameCache : IDisposable
         }
         catch (Exception ex)
         {
-            Logger.Error($"[Subframes] MarkSessionReplayed failed: {ex.Message}");
+            SubframesLogger.Error($"MarkSessionReplayed failed: {ex.Message}");
         }
     }
 
@@ -422,7 +423,7 @@ public sealed class FrameCache : IDisposable
         }
         catch (Exception ex)
         {
-            Logger.Error($"[Subframes] GetPendingReplaySessions failed: {ex.Message}");
+            SubframesLogger.Error($"GetPendingReplaySessions failed: {ex.Message}");
         }
         return results;
     }
@@ -447,7 +448,7 @@ public sealed class FrameCache : IDisposable
         }
         catch (Exception ex)
         {
-            Logger.Error($"[Subframes] InsertTarget failed: {ex.Message}");
+            SubframesLogger.Error($"InsertTarget failed: {ex.Message}");
         }
     }
 
@@ -468,7 +469,7 @@ public sealed class FrameCache : IDisposable
         }
         catch (Exception ex)
         {
-            Logger.Error($"[Subframes] MarkTargetAcked failed: {ex.Message}");
+            SubframesLogger.Error($"MarkTargetAcked failed: {ex.Message}");
         }
     }
 
@@ -489,7 +490,7 @@ public sealed class FrameCache : IDisposable
         }
         catch (Exception ex)
         {
-            Logger.Error($"[Subframes] MarkTargetEnded failed: {ex.Message}");
+            SubframesLogger.Error($"MarkTargetEnded failed: {ex.Message}");
         }
     }
 
@@ -523,7 +524,7 @@ public sealed class FrameCache : IDisposable
         }
         catch (Exception ex)
         {
-            Logger.Error($"[Subframes] GetTargetsForSession failed: {ex.Message}");
+            SubframesLogger.Error($"GetTargetsForSession failed: {ex.Message}");
         }
         return results;
     }
@@ -549,7 +550,7 @@ public sealed class FrameCache : IDisposable
         }
         catch (Exception ex)
         {
-            Logger.Error($"[Subframes] InsertEvent failed: {ex.Message}");
+            SubframesLogger.Error($"InsertEvent failed: {ex.Message}");
         }
     }
 
@@ -573,7 +574,7 @@ public sealed class FrameCache : IDisposable
         }
         catch (Exception ex)
         {
-            Logger.Error($"[Subframes] GetPendingEventsForSession failed: {ex.Message}");
+            SubframesLogger.Error($"GetPendingEventsForSession failed: {ex.Message}");
         }
         return results;
     }
@@ -596,7 +597,7 @@ public sealed class FrameCache : IDisposable
         }
         catch (Exception ex)
         {
-            Logger.Error($"[Subframes] MarkEventsSynced failed: {ex.Message}");
+            SubframesLogger.Error($"MarkEventsSynced failed: {ex.Message}");
         }
     }
 }
