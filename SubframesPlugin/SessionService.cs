@@ -366,8 +366,6 @@ public sealed class SessionService : IDisposable, IFocuserConsumer, IGuiderConsu
         if (sessionId is not null)
         {
             Logger.Info($"[Subframes] Session started: {sessionId} target='{request.TargetName}'");
-            if (_options.IsDebugEnabled)
-                Logger.Info($"[Subframes] Session start confirmed: sessionId={sessionId} target='{request.TargetName}'");
         }
         _isManualSession = true;
         // Store null when target name is empty or "Unknown Target" so
@@ -401,8 +399,7 @@ public sealed class SessionService : IDisposable, IFocuserConsumer, IGuiderConsu
         var localSessionId = _activeLocalSessionId;
         if (sessionId is null) return;
 
-        if (_options.IsDebugEnabled)
-            Logger.Info($"[Subframes] Ending session: sessionId={sessionId} frameCount={_frameCounter}");
+        Logger.Debug($"[Subframes] Ending session: sessionId={sessionId} frameCount={_frameCounter}");
 
         // Flush any remaining cached frames before ending the session.
         try { await _syncEngine.FlushAsync(ct); }
@@ -714,8 +711,7 @@ public sealed class SessionService : IDisposable, IFocuserConsumer, IGuiderConsu
             InstanceId     = string.IsNullOrWhiteSpace(_options.InstanceId) ? null : _options.InstanceId,
             InstanceName   = string.IsNullOrWhiteSpace(_options.InstanceName) ? null : _options.InstanceName,
         };
-        if (_options.IsDebugEnabled)
-            Logger.Info($"[Subframes] Immediate heartbeat: sessionId={sessionId} target='{_currentTarget}'");
+        Logger.Debug($"[Subframes] Immediate heartbeat: sessionId={sessionId} target='{_currentTarget}'");
         _ = _apiClient.SendHeartbeatAsync(payload, CancellationToken.None);
     }
 
@@ -1045,8 +1041,7 @@ public sealed class SessionService : IDisposable, IFocuserConsumer, IGuiderConsu
             // Fire-and-forget thumbnail — must not delay frame caching or imaging.
             _ = SendThumbnailAsync(sessionId, frameNumber, e);
 
-            if (_options.IsDebugEnabled)
-                Logger.Info($"[Subframes] Frame cached: sessionId={sessionId} frameNumber={frameNumber} targetId={_activeSessionTargetId ?? "none"} filter={filter ?? "none"} hfr={hfr?.ToString("F2") ?? "n/a"}");
+            Logger.Debug($"[Subframes] Frame cached: sessionId={sessionId} frameNumber={frameNumber} targetId={_activeSessionTargetId ?? "none"} filter={filter ?? "none"} hfr={hfr?.ToString("F2") ?? "n/a"}");
         }
         catch (Exception ex)
         {
@@ -1354,8 +1349,7 @@ public sealed class SessionService : IDisposable, IFocuserConsumer, IGuiderConsu
                     InstanceId     = string.IsNullOrWhiteSpace(_options.InstanceId) ? null : _options.InstanceId,
                     InstanceName   = string.IsNullOrWhiteSpace(_options.InstanceName) ? null : _options.InstanceName,
                 };
-                if (_options.IsDebugEnabled)
-                    Logger.Info($"[Subframes] Heartbeat firing: sessionId={sessionId} frameCount={payload.ExposureCount} uptimeMin={payload.UptimeMinutes}");
+                Logger.Debug($"[Subframes] Heartbeat firing: sessionId={sessionId} frameCount={payload.ExposureCount} uptimeMin={payload.UptimeMinutes}");
                 // Fire-and-forget — never block the timer loop on a slow network.
                 _ = _apiClient.SendHeartbeatAsync(payload, CancellationToken.None);
             }

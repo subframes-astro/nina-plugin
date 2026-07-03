@@ -98,8 +98,7 @@ public sealed class SyncEngine : IDisposable
             var pending = _cache.GetPendingFrames(50);
             if (pending.Count == 0) return;
 
-            if (_options.IsDebugEnabled)
-                Logger.Info($"[Subframes] SyncEngine: {pending.Count} pending frames to sync");
+            Logger.Debug($"[Subframes] SyncEngine: {pending.Count} pending frames to sync");
 
             // Group by session for batch upload.
             var bySession = pending
