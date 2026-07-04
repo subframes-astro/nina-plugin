@@ -1,8 +1,8 @@
 using System;
 using System.Collections.Concurrent;
 using System.IO;
+using System.Linq;
 using System.Threading;
-using System.Threading.Tasks;
 
 namespace Subframes.NinaPlugin;
 
@@ -172,14 +172,43 @@ public static class SubframesLogger
     /// <summary>
     /// Returns <c>true</c> when NINA's log configuration currently enables the Debug level.
     /// <para>
-    /// We cannot call NLog's LogManager directly (doing so would introduce a hard assembly
-    /// reference that breaks plugin loading). Instead we always return <c>true</c> — the
-    /// dedicated log file is small and only written during imaging sessions, so the cost
-    /// is negligible even at INFO level. Users who want to disable it can delete the files.
+    /// We cannot reference NLog types directly (doing so would introduce a hard assembly
+    /// dependency that breaks plugin loading via MEF). Instead we use reflection to check
+    /// NLog's LogManager at runtime — by then NINA has already loaded NLog into the AppDomain.
     /// </para>
     /// </summary>
     private static bool IsNinaDebugLevelEnabled()
     {
-        return true;
+        try
+        {
+            // NLog is loaded by NINA at runtime. Use reflection to call:
+            //   NLog.LogManager.GetLogger("NINA").IsDebugEnabled
+            var nlogAssembly = AppDomain.CurrentDomain.GetAssemblies()
+                .FirstOrDefault(a => a.GetName().Name == "NLog");
+            if (nlogAssembly == null)
+                return false;
+
+            var logManagerType = nlogAssembly.GetType("NLog.LogManager");
+            if (logManagerType == null)
+                return false;
+
+            var getLoggerMethod = logManagerType.GetMethod("GetLogger", new[] { typeof(string) });
+            if (getLoggerMethod == null)
+                return false;
+
+            var logger = getLoggerMethod.Invoke(null, new object[] { "NINA" });
+            if (logger == null)
+                return false;
+
+            var isDebugEnabledProp = logger.GetType().GetProperty("IsDebugEnabled");
+            if (isDebugEnabledProp == null)
+                return false;
+
+            return (bool)(isDebugEnabledProp.GetValue(logger) ?? false);
+        }
+        catch
+        {
+            return false;
+        }
     }
 }
