@@ -1479,9 +1479,11 @@ public sealed class SessionService : IDisposable, IFocuserConsumer, IGuiderConsu
     /// <summary>
     /// Called by NINA after each completed autofocus run.
     ///
-    /// Sends an "autofocus" event with filter, temperature, and focuser position
-    /// to the backend. Note: AutoFocusInfo does not expose success status or
-    /// resulting HFR — only the final position and ambient conditions are available.
+    /// Sends an "autofocus" event to the backend. When Hocus Focus is installed,
+    /// the event is enriched with achieved HFR, initial HFR, R², curve fitting method,
+    /// duration, step count, success flag, and star count via reflection on the concrete
+    /// runtime type. Falls back to the minimal schema (filter / temperature / position)
+    /// when Hocus Focus is absent or reflection fails.
     ///
     /// This method must not throw; any exception is caught and logged.
     /// </summary>
@@ -1496,9 +1498,11 @@ public sealed class SessionService : IDisposable, IFocuserConsumer, IGuiderConsu
                 sessionId,
                 autofocusInfo.Filter,
                 Finite(autofocusInfo.Temperature),
-                (int)autofocusInfo.Position);
+                (int)autofocusInfo.Position,
+                autofocusInfo);
 
-            SubframesLogger.Info($"UpdateEndAutoFocusRun called: session={sessionId} filter={autofocusInfo.Filter} position={autofocusInfo.Position} — posting autofocus event");
+            var hfDetected = AutofocusEventBuilder.DetectHocusFocus() is not null;
+            SubframesLogger.Info($"UpdateEndAutoFocusRun called: session={sessionId} filter={autofocusInfo.Filter} position={autofocusInfo.Position} hocusFocus={hfDetected} — posting autofocus event");
             PostOrCacheEvent(request);
         }
         catch (Exception ex)
