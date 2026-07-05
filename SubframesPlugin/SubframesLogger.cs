@@ -21,7 +21,18 @@ namespace Subframes.NinaPlugin;
 /// The debug log file is created once per NINA launch (not per calendar day), matching
 /// NINA's own log file behaviour. The logger dynamically monitors NINA's global log level
 /// and enables/disables file logging accordingly — if the user changes from INFO to DEBUG
-/// mid-session, file logging will start; if they change back, it will stop.
+/// mid-session, file logging will start immediately; if they change back, any queued
+/// entries are flushed and file logging stops.
+/// </para>
+///
+/// <para>
+/// Mid-session level changes are detected via two complementary mechanisms:
+/// <list type="number">
+///   <item>NLog's <c>LogManager.ConfigurationChanged</c> event (subscribed via reflection)
+///   for immediate, zero-latency detection whenever NINA reconfigures its loggers.</item>
+///   <item>A 5-second fallback poll of <c>IsDebugEnabled</c> via reflection, covering edge
+///   cases where NINA changes the threshold without triggering <c>ConfigurationChanged</c>.</item>
+/// </list>
 /// </para>
 ///
 /// Call <see cref="Initialize"/> from <c>Plugin.OnImportsSatisfied()</c> and
@@ -52,6 +63,11 @@ public static class SubframesLogger
     private static PropertyInfo? _isDebugEnabledProp;
     private static bool _reflectionResolved;
 
+    // NLog ConfigurationChanged event subscription (for immediate level-change detection).
+    private static EventInfo? _nlogConfigChangedEvent;
+    private static Delegate? _nlogConfigChangedHandler;
+    private static bool _eventSubscribed;
+
     // ── Public API ──────────────────────────────────────────────────────────
 
     /// <summary>
@@ -79,9 +95,16 @@ public static class SubframesLogger
             // Check log level now and adapt.
             EvaluateLogLevel();
 
-            // Periodically re-check NINA's log level every 10 seconds to adapt dynamically.
+            // Subscribe to NLog's ConfigurationChanged event for immediate detection.
+            // This fires whenever NINA calls LogManager.ReconfigExistingLoggers() or
+            // modifies logging rules — the exact mechanism NINA uses when the user
+            // changes the log level in preferences.
+            TrySubscribeNLogConfigurationChanged();
+
+            // Fallback: periodically re-check every 5 seconds to catch any edge cases
+            // where NINA changes the threshold without triggering ConfigurationChanged.
             _levelCheckTimer = new Timer(_ => EvaluateLogLevel(), null,
-                TimeSpan.FromSeconds(10), TimeSpan.FromSeconds(10));
+                TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(5));
 
             // Flush the queue every 2 seconds to avoid blocking the imaging thread.
             _flushTimer = new Timer(_ => FlushQueue(), null,
@@ -108,6 +131,9 @@ public static class SubframesLogger
             _levelCheckTimer = null;
             _flushTimer?.Dispose();
             _flushTimer = null;
+
+            // Unsubscribe from NLog's ConfigurationChanged event.
+            TryUnsubscribeNLogConfigurationChanged();
 
             // Final flush of any remaining entries.
             FlushQueue();
@@ -157,6 +183,104 @@ public static class SubframesLogger
 
     // ── Private helpers ──────────────────────────────────────────────────────
 
+    // ── NLog event subscription helpers ────────────────────────────────────
+
+    /// <summary>
+    /// Attempts to subscribe to NLog's <c>LogManager.ConfigurationChanged</c> static event
+    /// via reflection. This event fires immediately when NINA reconfigures its loggers
+    /// (e.g. when the user changes the log level in NINA's preferences), giving us
+    /// zero-latency detection without relying solely on the fallback polling timer.
+    ///
+    /// <para>Safe to call if reflection fails — the fallback poll timer covers the gap.</para>
+    /// </summary>
+    private static void TrySubscribeNLogConfigurationChanged()
+    {
+        try
+        {
+            if (_eventSubscribed)
+                return;
+
+            // NLog must already be loaded into the AppDomain by the time Initialize() runs.
+            var nlogAssembly = AppDomain.CurrentDomain.GetAssemblies()
+                .FirstOrDefault(a => a.GetName().Name == "NLog");
+            if (nlogAssembly == null)
+                return;
+
+            var logManagerType = nlogAssembly.GetType("NLog.LogManager");
+            if (logManagerType == null)
+                return;
+
+            _nlogConfigChangedEvent = logManagerType.GetEvent("ConfigurationChanged");
+            if (_nlogConfigChangedEvent == null)
+                return;
+
+            // The event is EventHandler<LoggingConfigurationChangedEventArgs>.
+            // We need a delegate whose signature matches (object?, EventArgs-derived).
+            // Use GetMethod to locate our static handler — its second parameter is
+            // declared as `object?` (EventArgs) which .NET allows for covariant
+            // event handler substitution when we create the delegate dynamically.
+            var handlerType = _nlogConfigChangedEvent.EventHandlerType;
+            if (handlerType == null)
+                return;
+
+            var handlerMethod = typeof(SubframesLogger).GetMethod(
+                nameof(OnNLogConfigurationChanged),
+                BindingFlags.NonPublic | BindingFlags.Static);
+            if (handlerMethod == null)
+                return;
+
+            // Locate our static handler. Its second parameter is declared as
+            // `EventArgs` (base class of LoggingConfigurationChangedEventArgs),
+            // which satisfies .NET delegate parameter contravariance.
+            // Delegate.CreateDelegate returns null (via throwOnBindFailure:false)
+            // if the runtime rejects the signature — the poll timer then covers us.
+            _nlogConfigChangedHandler = Delegate.CreateDelegate(handlerType, handlerMethod,
+                throwOnBindFailure: false);
+            if (_nlogConfigChangedHandler == null)
+                return;
+
+            _nlogConfigChangedEvent.AddEventHandler(null, _nlogConfigChangedHandler);
+            _eventSubscribed = true;
+        }
+        catch
+        {
+            // Subscription is best-effort. Fallback poll timer will cover us.
+            _eventSubscribed = false;
+        }
+    }
+
+    /// <summary>Removes the NLog ConfigurationChanged subscription on shutdown.</summary>
+    private static void TryUnsubscribeNLogConfigurationChanged()
+    {
+        try
+        {
+            if (_eventSubscribed && _nlogConfigChangedEvent != null && _nlogConfigChangedHandler != null)
+            {
+                _nlogConfigChangedEvent.RemoveEventHandler(null, _nlogConfigChangedHandler);
+            }
+        }
+        catch
+        {
+            // Best-effort cleanup.
+        }
+        finally
+        {
+            _eventSubscribed = false;
+            _nlogConfigChangedHandler = null;
+            _nlogConfigChangedEvent = null;
+        }
+    }
+
+    /// <summary>
+    /// Called by the NLog ConfigurationChanged event when NINA reconfigures its loggers.
+    /// Signature must be compatible with <c>EventHandler&lt;LoggingConfigurationChangedEventArgs&gt;</c>.
+    /// </summary>
+    private static void OnNLogConfigurationChanged(object? sender, EventArgs e)
+    {
+        // Re-evaluate immediately on any NLog configuration change.
+        EvaluateLogLevel();
+    }
+
     private static void EnqueueFile(string level, string message)
     {
         if (!_fileLoggingActive)
@@ -205,12 +329,15 @@ public static class SubframesLogger
             if (debugEnabled && !_fileLoggingActive)
             {
                 _fileLoggingActive = true;
+                WriteFileHeader();
                 NINA.Core.Utility.Logger.Info($"[Subframes] Debug log file enabled: {_logFilePath}");
             }
             else if (!debugEnabled && _fileLoggingActive)
             {
                 _fileLoggingActive = false;
                 NINA.Core.Utility.Logger.Info("[Subframes] Debug log file disabled — NINA log level changed to INFO or higher.");
+                // Flush immediately so queued entries reach disk before we stop.
+                FlushQueue();
             }
             else if (!debugEnabled && !_firstCheckDone)
             {
@@ -222,6 +349,32 @@ public static class SubframesLogger
         catch
         {
             // Don't crash the timer callback.
+        }
+    }
+
+    /// <summary>
+    /// Writes a session-start header to the log file so it is clear when file logging
+    /// was enabled and from which NINA session. Called each time file logging transitions
+    /// from inactive to active (including mid-session level changes).
+    /// </summary>
+    private static void WriteFileHeader()
+    {
+        if (_logFilePath == null)
+            return;
+        try
+        {
+            lock (_writeLock)
+            {
+                using var writer = new StreamWriter(_logFilePath, append: true);
+                writer.WriteLine();
+                writer.WriteLine($"{'=',-80}");
+                writer.WriteLine($"  Subframes debug log  — file logging enabled at {DateTime.Now:yyyy-MM-dd HH:mm:ss}");
+                writer.WriteLine($"{'=',-80}");
+            }
+        }
+        catch
+        {
+            // Non-fatal: session header is cosmetic.
         }
     }
 
