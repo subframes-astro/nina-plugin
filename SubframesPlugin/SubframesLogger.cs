@@ -408,7 +408,11 @@ public static class SubframesLogger
                     return false;
 
                 // Get the property type from the logger instance.
-                var tempLogger = _getLoggerMethod.Invoke(null, new object[] { "NINA" });
+                // Use NINA's actual logger name ("NINA.Core.Utility.Logger") so that
+                // NLog rule matching (e.g. "NINA.*") reflects the same threshold that
+                // NINA's own Logger class operates under. Using just "NINA" misses those
+                // wildcard rules and always returns the global default level.
+                var tempLogger = _getLoggerMethod.Invoke(null, new object[] { "NINA.Core.Utility.Logger" });
                 if (tempLogger == null)
                     return false;
 
@@ -419,7 +423,7 @@ public static class SubframesLogger
             if (_getLoggerMethod == null || _isDebugEnabledProp == null)
                 return false;
 
-            var logger = _getLoggerMethod.Invoke(null, new object[] { "NINA" });
+            var logger = _getLoggerMethod.Invoke(null, new object[] { "NINA.Core.Utility.Logger" });
             if (logger == null)
                 return false;
 
