@@ -59,7 +59,9 @@ public static class SubframesLogger
     private static readonly object _writeLock = new();
 
     // Cached reflection handles for NLog level checking (resolved once).
-    private static MethodInfo? _getLoggerMethod;
+    // We access NINA's actual private NLog logger field (not a newly-created logger)
+    // so that IsDebugEnabled reflects the exact same configuration that NINA itself uses.
+    private static FieldInfo? _cachedNLogLoggerField;
     private static PropertyInfo? _isDebugEnabledProp;
     private static bool _reflectionResolved;
 
@@ -382,52 +384,200 @@ public static class SubframesLogger
     /// Returns <c>true</c> when NINA's log configuration currently enables the Debug level.
     /// <para>
     /// We cannot reference NLog types directly (doing so would introduce a hard assembly
-    /// dependency that breaks plugin loading via MEF). Instead we use reflection to check
-    /// NLog's LogManager at runtime — by then NINA has already loaded NLog into the AppDomain.
-    /// Reflection handles are cached after first resolution for performance.
+    /// dependency that breaks plugin loading via MEF). Instead we use reflection to access
+    /// NINA's <em>actual</em> private NLog logger instance at runtime — the same object that
+    /// successfully writes DEBUG messages to the NINA log — so that <c>IsDebugEnabled</c>
+    /// is guaranteed to reflect the real active configuration.
+    /// </para>
+    /// <para>
+    /// Previous approaches used <c>LogManager.GetLogger(name)</c> which returns a <em>new</em>
+    /// logger instance whose level depends on NLog rule name-matching. If NINA's rules don't
+    /// match the name we supply (e.g. because NINA uses <c>GlobalThreshold</c> instead of
+    /// per-rule levels, or a different logger name), those loggers always report INFO and the
+    /// check incorrectly returns false even when DEBUG output is being produced.
     /// </para>
     /// </summary>
     private static bool IsNinaDebugLevelEnabled()
     {
         try
         {
-            // Resolve reflection handles once and cache them.
             if (!_reflectionResolved)
             {
-                var nlogAssembly = AppDomain.CurrentDomain.GetAssemblies()
-                    .FirstOrDefault(a => a.GetName().Name == "NLog");
-                if (nlogAssembly == null)
-                    return false;
-
-                var logManagerType = nlogAssembly.GetType("NLog.LogManager");
-                if (logManagerType == null)
-                    return false;
-
-                _getLoggerMethod = logManagerType.GetMethod("GetLogger", new[] { typeof(string) });
-                if (_getLoggerMethod == null)
-                    return false;
-
-                // Get the property type from the logger instance.
-                // Use NINA's actual logger name ("NINA.Core.Utility.Logger") so that
-                // NLog rule matching (e.g. "NINA.*") reflects the same threshold that
-                // NINA's own Logger class operates under. Using just "NINA" misses those
-                // wildcard rules and always returns the global default level.
-                var tempLogger = _getLoggerMethod.Invoke(null, new object[] { "NINA.Core.Utility.Logger" });
-                if (tempLogger == null)
-                    return false;
-
-                _isDebugEnabledProp = tempLogger.GetType().GetProperty("IsDebugEnabled");
+                ResolveNLogReflectionHandles();
                 _reflectionResolved = true;
             }
 
-            if (_getLoggerMethod == null || _isDebugEnabledProp == null)
+            // Primary path: read IsDebugEnabled from NINA's actual logger instance.
+            if (_cachedNLogLoggerField != null && _isDebugEnabledProp != null)
+            {
+                var nlogLogger = _cachedNLogLoggerField.GetValue(null);
+                return nlogLogger != null && (bool)(_isDebugEnabledProp.GetValue(nlogLogger) ?? false);
+            }
+
+            // Fallback path: query NLog's configuration directly.
+            return IsFallbackDebugEnabled();
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Resolves and caches the FieldInfo pointing to NINA's internal NLog logger field
+    /// and the PropertyInfo for <c>IsDebugEnabled</c> on that logger instance.
+    /// <para>
+    /// Strategy:
+    /// <list type="number">
+    ///   <item>Try well-known private static field names: "logger", "_logger", "nlogger", "_nlogger", "log", "_log".</item>
+    ///   <item>If none match, enumerate all private static fields on <c>NINA.Core.Utility.Logger</c>
+    ///   and pick the first one whose declared type comes from the NLog assembly and is named "Logger".</item>
+    /// </list>
+    /// If neither strategy finds the field, <c>_cachedNLogLoggerField</c> remains null and
+    /// <see cref="IsFallbackDebugEnabled"/> is used instead.
+    /// </para>
+    /// </summary>
+    private static void ResolveNLogReflectionHandles()
+    {
+        try
+        {
+            var ninaLoggerType = typeof(NINA.Core.Utility.Logger);
+
+            // Strategy 1: try well-known private static field names (most NINA versions).
+            string[] candidateNames = { "logger", "_logger", "nlogger", "_nlogger", "log", "_log" };
+            FieldInfo? loggerField = null;
+
+            foreach (var name in candidateNames)
+            {
+                var f = ninaLoggerType.GetField(name,
+                    BindingFlags.NonPublic | BindingFlags.Static | BindingFlags.IgnoreCase);
+                if (f != null && IsNLogLoggerFieldType(f.FieldType))
+                {
+                    loggerField = f;
+                    break;
+                }
+            }
+
+            // Strategy 2: enumerate all private static fields and find one from NLog.
+            if (loggerField == null)
+            {
+                var allStaticFields = ninaLoggerType.GetFields(BindingFlags.NonPublic | BindingFlags.Static);
+                loggerField = allStaticFields.FirstOrDefault(f => IsNLogLoggerFieldType(f.FieldType));
+            }
+
+            if (loggerField == null)
+                return; // No NLog field found — fall through to IsFallbackDebugEnabled.
+
+            // Verify the field actually holds a non-null instance at resolution time.
+            var testInstance = loggerField.GetValue(null);
+            if (testInstance == null)
+                return;
+
+            var debugProp = testInstance.GetType().GetProperty("IsDebugEnabled");
+            if (debugProp == null)
+                return;
+
+            _cachedNLogLoggerField = loggerField;
+            _isDebugEnabledProp = debugProp;
+        }
+        catch
+        {
+            // Resolution failed — IsFallbackDebugEnabled will handle detection.
+        }
+    }
+
+    /// <summary>
+    /// Returns <c>true</c> when the field type is NLog's Logger class (or a subclass),
+    /// identified by assembly name and type name to avoid a direct NLog type reference.
+    /// </summary>
+    private static bool IsNLogLoggerFieldType(Type t)
+    {
+        return t.Assembly.GetName().Name == "NLog"
+            && (t.Name == "Logger" || t.FullName == "NLog.Logger");
+    }
+
+    /// <summary>
+    /// Fallback level check used when <see cref="ResolveNLogReflectionHandles"/> could not
+    /// locate NINA's internal logger field.
+    /// <para>
+    /// Checks in order: <c>LogManager.GlobalThreshold</c> ordinal (Trace=0, Debug=1 ≤ 1 means
+    /// debug enabled), then iterates <c>LogManager.Configuration.LoggingRules</c> and calls
+    /// <c>IsLoggingEnabledForLevel(NLog.LogLevel.Debug)</c> on each rule.
+    /// </para>
+    /// </summary>
+    private static bool IsFallbackDebugEnabled()
+    {
+        try
+        {
+            var nlogAssembly = AppDomain.CurrentDomain.GetAssemblies()
+                .FirstOrDefault(a => a.GetName().Name == "NLog");
+            if (nlogAssembly == null)
                 return false;
 
-            var logger = _getLoggerMethod.Invoke(null, new object[] { "NINA.Core.Utility.Logger" });
-            if (logger == null)
+            var logManagerType = nlogAssembly.GetType("NLog.LogManager");
+            if (logManagerType == null)
                 return false;
 
-            return (bool)(_isDebugEnabledProp.GetValue(logger) ?? false);
+            // Check GlobalThreshold first — if it's set to Debug or Trace, we're done.
+            var globalThresholdProp = logManagerType.GetProperty("GlobalThreshold",
+                BindingFlags.Public | BindingFlags.Static);
+            if (globalThresholdProp != null)
+            {
+                var threshold = globalThresholdProp.GetValue(null);
+                if (threshold != null)
+                {
+                    var ordinalProp = threshold.GetType().GetProperty("Ordinal");
+                    if (ordinalProp != null)
+                    {
+                        int ordinal = (int)(ordinalProp.GetValue(threshold) ?? 6);
+                        // NLog ordinals: Trace=0, Debug=1, Info=2, Warn=3, Error=4, Fatal=5, Off=6
+                        if (ordinal <= 1)
+                            return true;
+                        // If GlobalThreshold is explicitly Info or higher, bail out early.
+                        if (ordinal > 1 && ordinal < 6)
+                            return false;
+                        // ordinal == 6 (Off) means GlobalThreshold is not restricting — fall through.
+                    }
+                }
+            }
+
+            // Fall through to per-rule check.
+            var configProp = logManagerType.GetProperty("Configuration",
+                BindingFlags.Public | BindingFlags.Static);
+            if (configProp == null)
+                return false;
+
+            var config = configProp.GetValue(null);
+            if (config == null)
+                return false;
+
+            var rulesProp = config.GetType().GetProperty("LoggingRules");
+            if (rulesProp == null)
+                return false;
+
+            var rules = rulesProp.GetValue(config) as System.Collections.IEnumerable;
+            if (rules == null)
+                return false;
+
+            // Resolve NLog.LogLevel.Debug value once.
+            var debugLevel = nlogAssembly.GetType("NLog.LogLevel")
+                ?.GetField("Debug", BindingFlags.Public | BindingFlags.Static)
+                ?.GetValue(null);
+            if (debugLevel == null)
+                return false;
+
+            foreach (var rule in rules)
+            {
+                var isEnabledMethod = rule.GetType().GetMethod("IsLoggingEnabledForLevel");
+                if (isEnabledMethod != null)
+                {
+                    var result = isEnabledMethod.Invoke(rule, new[] { debugLevel });
+                    if (result is bool enabled && enabled)
+                        return true;
+                }
+            }
+
+            return false;
         }
         catch
         {
