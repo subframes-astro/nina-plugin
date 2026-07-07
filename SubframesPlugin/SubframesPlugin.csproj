@@ -75,6 +75,12 @@
   <ItemGroup>
     <!-- System.ComponentModel.Composition for MEF exports -->
     <PackageReference Include="System.ComponentModel.Composition" Version="8.*" />
+    <!-- OxyPlot.Core: compile-time reference for OxyPlot.DataPoint used in IFocuserConsumer.
+         NINA ships OxyPlot at runtime; ExcludeAssets=runtime prevents copying to our output. -->
+    <PackageReference Include="OxyPlot.Core" Version="2.1.*">
+      <IncludeAssets>compile; analyzers</IncludeAssets>
+      <ExcludeAssets>runtime</ExcludeAssets>
+    </PackageReference>
     <!-- MVVM source generators for [ObservableProperty], [RelayCommand] etc. -->
     <PackageReference Include="CommunityToolkit.Mvvm" Version="8.*" />
     <!-- SQLite for offline frame caching.
