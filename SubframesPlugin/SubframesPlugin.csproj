@@ -77,7 +77,7 @@
     <PackageReference Include="System.ComponentModel.Composition" Version="8.*" />
     <!-- OxyPlot.Core: compile-time reference for OxyPlot.DataPoint used in IFocuserConsumer.
          NINA ships OxyPlot at runtime; ExcludeAssets=runtime prevents copying to our output. -->
-    <PackageReference Include="OxyPlot.Core" Version="2.1.*">
+    <PackageReference Include="OxyPlot.Core" Version="2.2.*">
       <IncludeAssets>compile; analyzers</IncludeAssets>
       <ExcludeAssets>runtime</ExcludeAssets>
     </PackageReference>
