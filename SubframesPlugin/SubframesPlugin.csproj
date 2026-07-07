@@ -82,6 +82,8 @@
          winsqlite3.dll (Win 8.1+) and avoid distributing a native e_sqlite3.dll. -->
     <PackageReference Include="Microsoft.Data.Sqlite.Core" Version="8.*" />
     <PackageReference Include="SQLitePCLRaw.bundle_winsqlite3" Version="2.*" />
+    <!-- OxyPlot for DataPoint type used in autofocus metric collection -->
+    <PackageReference Include="OxyPlot.Core" Version="2.*" />
 
   </ItemGroup>
 
