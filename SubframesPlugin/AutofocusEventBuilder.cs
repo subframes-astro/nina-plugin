@@ -10,11 +10,22 @@ namespace Subframes.NinaPlugin;
 /// independently of NINA SDK types. <see cref="SessionService.UpdateEndAutoFocusRun"/>
 /// calls this method and passes the result to <c>SubframesClient.PostEventAsync</c>.
 ///
-/// When Hocus Focus is installed, the method attempts to reflect on the concrete
-/// <c>AutoFocusInfo</c> subtype to extract enriched metrics (achievedHfr, initialHfr,
-/// rSquared, curveFitting, duration, stepCount, success, starCount). All enriched
-/// fields are optional — when Hocus Focus is absent or the reflection fails the
-/// payload falls back to the standard minimal schema (filter / temperature / position).
+/// <para>
+/// <b>Enrichment approach (revised for HF 4.x compatibility)</b>: The enriched metrics
+/// (achievedHfr, initialHfr, stepCount, duration) are now derived from
+/// <c>IFocuserConsumer.NewAutoFocusPoint</c> DataPoints collected by
+/// <see cref="SessionService"/> during the run. This works for both stock NINA autofocus
+/// and Hocus Focus 4.x because both broadcast via
+/// <c>IFocuserMediator.BroadcastNewAutoFocusPoint</c>. The earlier reflection-based
+/// approach on the <c>AutoFocusInfo</c> object was incorrect: <c>AutoFocusInfo</c> only
+/// carries filter/temperature/position/timestamp and never contains HFR data.
+/// </para>
+///
+/// <para>
+/// The reflection-based <c>Build</c> overload that accepts an <c>autofocusInfoObj</c>
+/// is preserved for backward compatibility and for cases where Hocus Focus does
+/// subclass <c>AutoFocusInfo</c> (earlier HF versions).
+/// </para>
 /// </summary>
 internal static class AutofocusEventBuilder
 {
@@ -206,9 +217,37 @@ internal static class AutofocusEventBuilder
     /// Resolves and caches Hocus Focus reflection properties from the runtime type of
     /// <paramref name="autofocusInfoObj"/>. Called once per process.
     /// </summary>
+    // ── Diagnostic info for the caller to log ────────────────────────────────
+
+    /// <summary>
+    /// Type name and property summary captured the last time <see cref="ResolveHFProperties"/>
+    /// ran. Used by <c>SessionService</c> to log the actual runtime shape of the
+    /// <c>AutoFocusInfo</c> object when Hocus Focus is detected — critical for
+    /// diagnosing property-name mismatches across HF versions.
+    /// </summary>
+    private static string? _lastResolvedTypeName;
+    private static string? _lastResolvedPropertySummary;
+
+    /// <summary>
+    /// Returns diagnostic information captured when <see cref="ResolveHFProperties"/> last ran:
+    /// the fully-qualified runtime type name and a comma-separated list of its public
+    /// instance property names. Both values are <c>null</c> until the first enriched Build
+    /// call completes property resolution.
+    /// </summary>
+    internal static (string? TypeName, string? PropertySummary) GetLastHFResolvedDiagnostics()
+        => (_lastResolvedTypeName, _lastResolvedPropertySummary);
+
     private static void ResolveHFProperties(object autofocusInfoObj)
     {
         var type = autofocusInfoObj.GetType();
+
+        // ── Diagnostic: capture the actual runtime type and all its public instance
+        // properties so SessionService can log them. This is the key diagnostic for
+        // identifying why enrichment fails when HF doesn't subclass AutoFocusInfo.
+        _lastResolvedTypeName = type.FullName;
+        _lastResolvedPropertySummary = string.Join(", ",
+            type.GetProperties(BindingFlags.Public | BindingFlags.Instance)
+                .Select(p => $"{p.PropertyType.Name} {p.Name}"));
 
         _achievedHfrProp  = FindProperty(type, "AchievedHFR",  "FinalHFR",   "HFR");
         _initialHfrProp   = FindProperty(type, "InitialHFR",   "StartHFR");
