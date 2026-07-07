@@ -10,7 +10,7 @@
     <RootNamespace>Subframes.NinaPlugin</RootNamespace>
 
 
-    <Version>0.6.5</Version>
+    <Version>0.6.6</Version>
 
     <!-- Ensure all NuGet dependency DLLs are copied to the build output dir.
          NINA's AssemblyResolve hook looks in the plugin subfolder, so all
