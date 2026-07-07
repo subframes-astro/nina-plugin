@@ -416,6 +416,75 @@ public sealed class AutofocusEventBuilderTests
     }
 
     // ═══════════════════════════════════════════════════════════════════════
+    // 6. GetLastHFResolvedDiagnostics — diagnostic info for troubleshooting
+    //    (key tool for diagnosing the HF 4.x root cause: AutoFocusInfo never
+    //     carries HFR, so enrichment must come from DataPoints instead)
+    // ═══════════════════════════════════════════════════════════════════════
+
+    [Fact]
+    public void GetLastHFResolvedDiagnostics_ReturnsNullBeforeAnyResolution()
+    {
+        ResetHFReflectionCache();
+        // Reset the diagnostic fields too.
+        SetPrivateStatic(typeof(AutofocusEventBuilder), "_lastResolvedTypeName", null);
+        SetPrivateStatic(typeof(AutofocusEventBuilder), "_lastResolvedPropertySummary", null);
+
+        var (typeName, propertySummary) = AutofocusEventBuilder.GetLastHFResolvedDiagnostics();
+        Assert.Null(typeName);
+        Assert.Null(propertySummary);
+    }
+
+    [Fact]
+    public void GetLastHFResolvedDiagnostics_CapturesTypeNameAfterEnrichment()
+    {
+        ResetHFReflectionCache();
+        var hfObj = new MockHFAutofocusInfo { AchievedHFR = 1.5 };
+        InjectMockHFAssembly(typeof(MockHFAutofocusInfo).Assembly);
+
+        AutofocusEventBuilder.Build("s", "L", -5.0, 12000, hfObj);
+
+        var (typeName, _) = AutofocusEventBuilder.GetLastHFResolvedDiagnostics();
+        Assert.NotNull(typeName);
+        Assert.Contains("MockHFAutofocusInfo", typeName,
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void GetLastHFResolvedDiagnostics_CapturesPropertyNamesAfterEnrichment()
+    {
+        ResetHFReflectionCache();
+        var hfObj = new MockHFAutofocusInfo { AchievedHFR = 1.5 };
+        InjectMockHFAssembly(typeof(MockHFAutofocusInfo).Assembly);
+
+        AutofocusEventBuilder.Build("s", "L", -5.0, 12000, hfObj);
+
+        var (_, propertySummary) = AutofocusEventBuilder.GetLastHFResolvedDiagnostics();
+        Assert.NotNull(propertySummary);
+        // MockHFAutofocusInfo exposes AchievedHFR among its properties.
+        Assert.Contains("AchievedHFR", propertySummary, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void GetLastHFResolvedDiagnostics_StockAutoFocusInfo_ShowsNoEnrichedProperties()
+    {
+        // This test confirms the root cause of SUB-1897:
+        // When the object is the stock NINA AutoFocusInfo (no HF subclass),
+        // the property summary will NOT contain AchievedHFR, showing why
+        // the reflection approach yields no enriched fields for HF 4.x.
+        ResetHFReflectionCache();
+        var plainObj = new PlainAutofocusInfo();
+        InjectMockHFAssembly(typeof(PlainAutofocusInfo).Assembly);
+
+        AutofocusEventBuilder.Build("s", "L", -5.0, 12000, plainObj);
+
+        var (typeName, propertySummary) = AutofocusEventBuilder.GetLastHFResolvedDiagnostics();
+        Assert.NotNull(typeName);
+        Assert.NotNull(propertySummary);
+        Assert.DoesNotContain("AchievedHFR", propertySummary,
+            StringComparison.OrdinalIgnoreCase);
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
     // Helpers
     // ═══════════════════════════════════════════════════════════════════════
 
@@ -441,6 +510,8 @@ public sealed class AutofocusEventBuilderTests
         SetPrivateStatic(typeof(AutofocusEventBuilder), "_stepCountProp",    null);
         SetPrivateStatic(typeof(AutofocusEventBuilder), "_successProp",      null);
         SetPrivateStatic(typeof(AutofocusEventBuilder), "_starCountProp",    null);
+        SetPrivateStatic(typeof(AutofocusEventBuilder), "_lastResolvedTypeName", null);
+        SetPrivateStatic(typeof(AutofocusEventBuilder), "_lastResolvedPropertySummary", null);
     }
 
     /// <summary>Resets the HF assembly detection cache.</summary>

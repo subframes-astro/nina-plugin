@@ -12,6 +12,7 @@ using NINA.Equipment.Equipment.MyGuider;
 using NINA.Equipment.Equipment.MySafetyMonitor;
 using NINA.Equipment.Interfaces.Mediator;
 using NINA.WPF.Base.Interfaces.Mediator;
+using OxyPlot;
 using Subframes.NinaPlugin.Api;
 using Subframes.NinaPlugin.Data;
 
@@ -89,6 +90,16 @@ public sealed class SessionService : IDisposable, IFocuserConsumer, IGuiderConsu
     // Safety state tracking — detect IsSafe transitions via ISafetyMonitorConsumer.
     // volatile does not support nullable value types; use int sentinel: -1=unknown, 0=unsafe, 1=safe.
     private volatile int _lastIsSafeState = -1;
+
+    // ── Autofocus run tracking (IFocuserConsumer) ───────────────────────────────────────
+    // AutoFocusRunStarting resets the list; NewAutoFocusPoint accumulates each
+    // (position, HFR) DataPoint broadcast by the focuser mediator during the run;
+    // UpdateEndAutoFocusRun reads the snapshot and extracts enriched metrics.
+    // All three callbacks are sequential in NINA's autofocus flow, but we hold a
+    // lock for correctness in edge cases (e.g. session register races).
+    private readonly object _afLock = new();
+    private DateTime _afRunStartTime = DateTime.MinValue;
+    private readonly List<(double Position, double Hfr)> _afDataPoints = new();
 
     private sealed record HeartbeatSnapshot(string? Filter, double? LatestHfr, double? LatestRmsTotal);
 
@@ -1477,13 +1488,45 @@ public sealed class SessionService : IDisposable, IFocuserConsumer, IGuiderConsu
     // ── IFocuserConsumer ─────────────────────────────────────────────────────
 
     /// <summary>
+    /// Called by NINA (via FocuserMediator) when an autofocus run is about to start.
+    /// Resets the DataPoint collection and records the start time for duration tracking.
+    /// Must not throw; called on NINA's internal thread pool.
+    /// </summary>
+    public void AutoFocusRunStarting()
+    {
+        lock (_afLock)
+        {
+            _afRunStartTime = DateTime.UtcNow;
+            _afDataPoints.Clear();
+        }
+        SubframesLogger.Debug("AutoFocusRunStarting: collecting focus-point DataPoints for enriched metrics.");
+    }
+
+    /// <summary>
+    /// Called by NINA after each individual focus-point measurement during an autofocus run.
+    /// Accumulates (position, HFR) pairs for metric extraction in
+    /// <see cref="UpdateEndAutoFocusRun"/>. Works for both stock NINA autofocus and Hocus
+    /// Focus because both broadcast via <c>IFocuserMediator.BroadcastNewAutoFocusPoint</c>.
+    /// Must not throw; called on NINA's internal thread pool.
+    /// </summary>
+    public void NewAutoFocusPoint(DataPoint dataPoint)
+    {
+        lock (_afLock)
+        {
+            _afDataPoints.Add((dataPoint.X, dataPoint.Y));
+        }
+    }
+
+    /// <summary>
     /// Called by NINA after each completed autofocus run.
     ///
-    /// Sends an "autofocus" event to the backend. When Hocus Focus is installed,
-    /// the event is enriched with achieved HFR, initial HFR, R², curve fitting method,
-    /// duration, step count, success flag, and star count via reflection on the concrete
-    /// runtime type. Falls back to the minimal schema (filter / temperature / position)
-    /// when Hocus Focus is absent or reflection fails.
+    /// Builds and posts an "autofocus" event. Enriched metrics (achievedHfr, initialHfr,
+    /// stepCount, duration, success) are derived from DataPoints accumulated by
+    /// <see cref="NewAutoFocusPoint"/> during the run — this works for both stock NINA
+    /// and Hocus Focus 4.x because the enriched data is NOT in the AutoFocusInfo object
+    /// (which only carries filter/temperature/position/timestamp).
+    ///
+    /// When Hocus Focus is installed, source and sourceVersion fields are also added.
     ///
     /// This method must not throw; any exception is caught and logged.
     /// </summary>
@@ -1494,15 +1537,86 @@ public sealed class SessionService : IDisposable, IFocuserConsumer, IGuiderConsu
 
         try
         {
-            var request = AutofocusEventBuilder.Build(
-                sessionId,
-                autofocusInfo.Filter,
-                Finite(autofocusInfo.Temperature),
-                (int)autofocusInfo.Position,
-                autofocusInfo);
+            var hfAssembly = AutofocusEventBuilder.DetectHocusFocus();
 
-            var hfDetected = AutofocusEventBuilder.DetectHocusFocus() is not null;
-            SubframesLogger.Info($"UpdateEndAutoFocusRun called: session={sessionId} filter={autofocusInfo.Filter} position={autofocusInfo.Position} hocusFocus={hfDetected} — posting autofocus event");
+            // Snapshot the collected DataPoints thread-safely.
+            List<(double Position, double Hfr)> points;
+            DateTime runStart;
+            lock (_afLock)
+            {
+                points   = new List<(double, double)>(_afDataPoints);
+                runStart = _afRunStartTime;
+            }
+
+            // Diagnostic: log the actual runtime type of the AutoFocusInfo object.
+            // Root-cause diagnostic: AutoFocusInfo is a minimal NINA class with only
+            // Filter/Temperature/Position/Timestamp — HFR is never present here regardless
+            // of which AF engine (stock or Hocus Focus) ran. Metrics come from DataPoints.
+            var autoFocusInfoTypeName = autofocusInfo.GetType().FullName;
+            SubframesLogger.Debug(
+                $"UpdateEndAutoFocusRun: autoFocusInfoObj type='{autoFocusInfoTypeName}', " +
+                $"dataPoints={points.Count}, hocusFocus={hfAssembly is not null}");
+
+            // Build the metadata dictionary from the standard minimal fields.
+            var metadata = new Dictionary<string, object?>
+            {
+                ["filter"]      = autofocusInfo.Filter,
+                ["temperature"] = Finite(autofocusInfo.Temperature),
+                ["position"]    = (int)autofocusInfo.Position,
+            };
+
+            // The fact that UpdateEndAutoFocusRun was called already implies success.
+            metadata["success"] = true;
+
+            // ── Enrich with DataPoint-derived metrics (works for any AF engine) ──────────
+            if (points.Count > 0)
+            {
+                metadata["stepCount"] = points.Count;
+
+                var validPoints = points
+                    .Where(p => p.Hfr > 0 && double.IsFinite(p.Hfr))
+                    .ToList();
+
+                if (validPoints.Count > 0)
+                {
+                    // achievedHfr = minimum HFR seen during the run (best focus position).
+                    metadata["achievedHfr"] = validPoints.Min(p => p.Hfr);
+
+                    // initialHfr = HFR of the first valid measurement before focusing.
+                    metadata["initialHfr"]  = validPoints[0].Hfr;
+                }
+
+                // Duration from AutoFocusRunStarting to now.
+                if (runStart != DateTime.MinValue)
+                {
+                    var durationSeconds = (DateTime.UtcNow - runStart).TotalSeconds;
+                    if (durationSeconds is >= 0 and < 7200)
+                        metadata["duration"] = durationSeconds;
+                }
+            }
+
+            // ── Source attribution when Hocus Focus is installed ──────────────────────
+            if (hfAssembly is not null)
+            {
+                metadata["source"]        = "hocus_focus";
+                metadata["sourceVersion"] = hfAssembly.GetName().Version?.ToString();
+            }
+
+            var request = new EventRequest
+            {
+                SessionId = sessionId,
+                EventType = "autofocus",
+                Timestamp = DateTime.UtcNow.ToString("o"),
+                Metadata  = metadata,
+            };
+
+            SubframesLogger.Info(
+                $"UpdateEndAutoFocusRun: session={sessionId} filter={autofocusInfo.Filter} " +
+                $"position={autofocusInfo.Position} hocusFocus={hfAssembly is not null} " +
+                $"dataPoints={points.Count} " +
+                $"achievedHfr={metadata.GetValueOrDefault("achievedHfr")} " +
+                $"initialHfr={metadata.GetValueOrDefault("initialHfr")} " +
+                $"— posting autofocus event");
             PostOrCacheEvent(request);
         }
         catch (Exception ex)
