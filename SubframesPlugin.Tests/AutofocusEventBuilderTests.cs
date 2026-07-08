@@ -538,7 +538,235 @@ public sealed class AutofocusEventBuilderTests
         field.SetValue(null, value);
     }
 
-    // ── Mock types ────────────────────────────────────────────────────────
+    // ═══════════════════════════════════════════════════════════════════
+    // 7. BuildFocusPoints — focus-point array builder
+    // ═══════════════════════════════════════════════════════════════════
+
+    [Fact]
+    public void BuildFocusPoints_EmptyInput_ReturnsEmptyList()
+    {
+        var result = AutofocusEventBuilder.BuildFocusPoints(
+            Array.Empty<(double, double)>());
+        Assert.Empty(result);
+    }
+
+    [Fact]
+    public void BuildFocusPoints_TypicalPoints_CountMatchesInput()
+    {
+        var points = new[]
+        {
+            (15500.0, 8.2),
+            (15700.0, 5.1),
+            (15900.0, 3.4),
+            (16037.0, 2.97),
+            (16200.0, 3.6),
+            (16400.0, 5.3),
+            (16600.0, 8.5),
+        };
+        var result = AutofocusEventBuilder.BuildFocusPoints(points);
+        Assert.Equal(7, result.Count);
+    }
+
+    [Fact]
+    public void BuildFocusPoints_EachEntry_HasPositionAndHfrKeys()
+    {
+        var points = new[] { (16037.0, 2.97) };
+        var result = AutofocusEventBuilder.BuildFocusPoints(points);
+        Assert.Single(result);
+        Assert.True(result[0].ContainsKey("position"), "Entry must contain 'position'");
+        Assert.True(result[0].ContainsKey("hfr"),      "Entry must contain 'hfr'");
+    }
+
+    [Fact]
+    public void BuildFocusPoints_Position_IsRoundedToInteger()
+    {
+        // 16037.6 should round to 16038.
+        var points = new[] { (16037.6, 2.97) };
+        var result = AutofocusEventBuilder.BuildFocusPoints(points);
+        Assert.Equal(16038, result[0]["position"]);
+    }
+
+    [Fact]
+    public void BuildFocusPoints_Hfr_IsPreserved()
+    {
+        var points = new[] { (16000.0, 2.97) };
+        var result = AutofocusEventBuilder.BuildFocusPoints(points);
+        Assert.Equal(2.97, result[0]["hfr"]);
+    }
+
+    [Fact]
+    public void BuildFocusPoints_NegativeHfr_IsExcluded()
+    {
+        var points = new[]
+        {
+            (15500.0, -1.0),  // NINA sentinel — should be excluded
+            (16000.0, 2.97),  // valid
+        };
+        var result = AutofocusEventBuilder.BuildFocusPoints(points);
+        Assert.Single(result);
+        Assert.Equal(16000, result[0]["position"]);
+    }
+
+    [Fact]
+    public void BuildFocusPoints_ZeroHfr_IsExcluded()
+    {
+        var points = new[]
+        {
+            (15500.0, 0.0),   // zero HFR — invalid
+            (16000.0, 3.14),  // valid
+        };
+        var result = AutofocusEventBuilder.BuildFocusPoints(points);
+        Assert.Single(result);
+    }
+
+    [Fact]
+    public void BuildFocusPoints_NaNHfr_IsExcluded()
+    {
+        var points = new[]
+        {
+            (15500.0, double.NaN),
+            (16000.0, 3.14),
+        };
+        var result = AutofocusEventBuilder.BuildFocusPoints(points);
+        Assert.Single(result);
+    }
+
+    [Fact]
+    public void BuildFocusPoints_InfinitePosition_IsExcluded()
+    {
+        var points = new[]
+        {
+            (double.PositiveInfinity, 3.14),
+            (16000.0, 2.97),
+        };
+        var result = AutofocusEventBuilder.BuildFocusPoints(points);
+        Assert.Single(result);
+    }
+
+    [Fact]
+    public void BuildFocusPoints_TypicalVCurveDataset_CorrectOrder()
+    {
+        var points = new[]
+        {
+            (15500.0, 8.2),
+            (15700.0, 5.1),
+            (16037.0, 2.97),
+            (16600.0, 8.5),
+        };
+        var result = AutofocusEventBuilder.BuildFocusPoints(points);
+        Assert.Equal(4,     result.Count);
+        Assert.Equal(15500, result[0]["position"]);
+        Assert.Equal(8.2,   result[0]["hfr"]);
+        Assert.Equal(16600, result[3]["position"]);
+        Assert.Equal(8.5,   result[3]["hfr"]);
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
+    // 8. TryAddHFCurveMetrics — HF curve-fitting field extractor
+    // ═══════════════════════════════════════════════════════════════════
+
+    [Fact]
+    public void TryAddHFCurveMetrics_RSquared_ExtractedCorrectly()
+    {
+        ResetHFReflectionCache();
+        var hfObj   = new MockHFAutofocusInfo { RSquared = 0.9987 };
+        var metadata = new Dictionary<string, object?>();
+        // Resolve properties from mock HF type.
+        AutofocusEventBuilder.TryAddHFCurveMetrics(hfObj, metadata);
+        Assert.Equal(0.9987, metadata["rSquared"]);
+    }
+
+    [Fact]
+    public void TryAddHFCurveMetrics_CurveFitting_ExtractedCorrectly()
+    {
+        ResetHFReflectionCache();
+        var hfObj    = new MockHFAutofocusInfo { CurveFittingMethod = "Hyperbolic" };
+        var metadata = new Dictionary<string, object?>();
+        AutofocusEventBuilder.TryAddHFCurveMetrics(hfObj, metadata);
+        Assert.Equal("Hyperbolic", metadata["curveFitting"]);
+    }
+
+    [Fact]
+    public void TryAddHFCurveMetrics_StarCount_ExtractedCorrectly()
+    {
+        ResetHFReflectionCache();
+        var hfObj    = new MockHFAutofocusInfo { NumberOfStars = 42 };
+        var metadata = new Dictionary<string, object?>();
+        AutofocusEventBuilder.TryAddHFCurveMetrics(hfObj, metadata);
+        Assert.Equal(42, metadata["starCount"]);
+    }
+
+    [Fact]
+    public void TryAddHFCurveMetrics_AllThree_ExtractedTogether()
+    {
+        ResetHFReflectionCache();
+        var hfObj = new MockHFAutofocusInfo
+        {
+            RSquared           = 0.9987,
+            CurveFittingMethod = "Hyperbolic",
+            NumberOfStars      = 42,
+        };
+        var metadata = new Dictionary<string, object?>();
+        AutofocusEventBuilder.TryAddHFCurveMetrics(hfObj, metadata);
+        Assert.Equal(0.9987,        metadata["rSquared"]);
+        Assert.Equal("Hyperbolic",  metadata["curveFitting"]);
+        Assert.Equal(42,             metadata["starCount"]);
+    }
+
+    [Fact]
+    public void TryAddHFCurveMetrics_PlainObject_NoFieldsAdded()
+    {
+        ResetHFReflectionCache();
+        var plainObj = new PlainAutofocusInfo();
+        var metadata = new Dictionary<string, object?>();
+        AutofocusEventBuilder.TryAddHFCurveMetrics(plainObj, metadata);
+        Assert.False(metadata.ContainsKey("rSquared"),     "rSquared should not be present for plain objects");
+        Assert.False(metadata.ContainsKey("curveFitting"), "curveFitting should not be present for plain objects");
+        Assert.False(metadata.ContainsKey("starCount"),    "starCount should not be present for plain objects");
+    }
+
+    [Fact]
+    public void TryAddHFCurveMetrics_NegativeRSquared_IsOmitted()
+    {
+        ResetHFReflectionCache();
+        var hfObj    = new MockHFAutofocusInfo { RSquared = -0.1 };
+        var metadata = new Dictionary<string, object?>();
+        AutofocusEventBuilder.TryAddHFCurveMetrics(hfObj, metadata);
+        Assert.False(metadata.ContainsKey("rSquared"), "Negative rSquared should be omitted");
+    }
+
+    [Fact]
+    public void TryAddHFCurveMetrics_EmptyCurveFitting_IsOmitted()
+    {
+        ResetHFReflectionCache();
+        var hfObj    = new MockHFAutofocusInfo { CurveFittingMethod = "" };
+        var metadata = new Dictionary<string, object?>();
+        AutofocusEventBuilder.TryAddHFCurveMetrics(hfObj, metadata);
+        Assert.False(metadata.ContainsKey("curveFitting"), "Empty curveFitting should be omitted");
+    }
+
+    [Fact]
+    public void TryAddHFCurveMetrics_DoesNotOverwriteExistingMetadataKeys()
+    {
+        // Existing keys set by SessionService (e.g. achievedHfr from DataPoints)
+        // must not be clobbered by the HF reflection path.
+        ResetHFReflectionCache();
+        var hfObj    = new MockHFAutofocusInfo { RSquared = 0.99, NumberOfStars = 10 };
+        var metadata = new Dictionary<string, object?>
+        {
+            ["achievedHfr"] = 2.5,
+            ["stepCount"]   = 7,
+        };
+        AutofocusEventBuilder.TryAddHFCurveMetrics(hfObj, metadata);
+        // Original keys must be untouched.
+        Assert.Equal(2.5, metadata["achievedHfr"]);
+        Assert.Equal(7,   metadata["stepCount"]);
+        // New HF-specific keys must be added.
+        Assert.Equal(0.99, metadata["rSquared"]);
+        Assert.Equal(10,   metadata["starCount"]);
+    }
+
+    // ── Mock types ───────────────────────────────────────────────────────────────────
 
     /// <summary>Plain object with no Hocus Focus properties (simulates stock NINA struct).</summary>
     private sealed class PlainAutofocusInfo { }

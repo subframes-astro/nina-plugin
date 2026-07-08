@@ -1584,6 +1584,11 @@ public sealed class SessionService : IDisposable, IFocuserConsumer, IGuiderConsu
 
                     // initialHfr = HFR of the first valid measurement before focusing.
                     metadata["initialHfr"]  = validPoints[0].Hfr;
+
+                    // focusPoints — the full V-curve dataset for chart rendering.
+                    var focusPoints = AutofocusEventBuilder.BuildFocusPoints(validPoints);
+                    if (focusPoints.Count > 0)
+                        metadata["focusPoints"] = focusPoints;
                 }
 
                 // Duration from AutoFocusRunStarting to now.
@@ -1600,6 +1605,18 @@ public sealed class SessionService : IDisposable, IFocuserConsumer, IGuiderConsu
             {
                 metadata["source"]        = "hocus_focus";
                 metadata["sourceVersion"] = hfAssembly.GetName().Version?.ToString();
+
+                // Try to extract curve-fitting metrics (rSquared, curveFitting, starCount)
+                // from the AutoFocusInfo object via reflection.  Works for HF versions that
+                // subclass AutoFocusInfo; silently no-ops for HF 4.x (no subclass).
+                try
+                {
+                    AutofocusEventBuilder.TryAddHFCurveMetrics(autofocusInfo, metadata);
+                }
+                catch (Exception hfEx)
+                {
+                    SubframesLogger.Warning($"TryAddHFCurveMetrics failed: {hfEx.Message}");
+                }
             }
 
             var request = new EventRequest
