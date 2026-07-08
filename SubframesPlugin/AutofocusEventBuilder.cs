@@ -65,6 +65,87 @@ internal static class AutofocusEventBuilder
     private static PropertyInfo? _starCountProp;
     private static bool _hfPropsResolved;
 
+    // ── Focus-point helpers ────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Converts a list of raw autofocus data points collected by
+    /// <see cref="SessionService"/> into the <c>focusPoints</c> array sent in the
+    /// autofocus event metadata.  Points with invalid (non-finite, non-positive) HFR
+    /// values are excluded.  Focuser position is rounded to the nearest integer because
+    /// focuser step counts are always whole numbers.
+    /// </summary>
+    /// <param name="points">Raw data points accumulated during the autofocus run.</param>
+    /// <returns>
+    ///   A list of <c>{ position, hfr }</c> dictionaries suitable for JSON serialisation.
+    ///   Returns an empty list when no valid points are present.
+    /// </returns>
+    internal static List<Dictionary<string, object>> BuildFocusPoints(
+        IEnumerable<(double Position, double Hfr)> points)
+    {
+        return points
+            .Where(p => p.Hfr > 0 && double.IsFinite(p.Hfr) && double.IsFinite(p.Position))
+            .Select(p => new Dictionary<string, object>
+            {
+                ["position"] = (int)Math.Round(p.Position),
+                ["hfr"]      = p.Hfr,
+            })
+            .ToList();
+    }
+
+    /// <summary>
+    /// Tries to extract Hocus Focus curve-fitting metadata (<c>rSquared</c>,
+    /// <c>curveFitting</c>, <c>starCount</c>) from the autofocus info object via
+    /// reflection and merges them into <paramref name="metadata"/>.
+    ///
+    /// <para>
+    /// These three fields are NOT derivable from <c>IFocuserConsumer.NewAutoFocusPoint</c>
+    /// data points — they describe the fitted curve, not individual measurements.
+    /// They are therefore sourced from the runtime type of the <c>AutoFocusInfo</c>
+    /// object passed to <c>UpdateEndAutoFocusRun</c>.  For HF versions that subclass
+    /// <c>AutoFocusInfo</c> the properties will be found via reflection; for HF 4.x
+    /// (which stopped subclassing) they will not be present and no entries are added.
+    /// </para>
+    ///
+    /// <para>
+    /// <see cref="SessionService"/> calls this method only when Hocus Focus is detected
+    /// (i.e. after checking <see cref="DetectHocusFocus"/>).  The method is safe to
+    /// call on any object — reflection failures degrade silently without throwing.
+    /// </para>
+    /// </summary>
+    /// <param name="autofocusInfoObj">
+    ///   The <c>AutoFocusInfo</c> (or subtype) passed to <c>UpdateEndAutoFocusRun</c>.
+    /// </param>
+    /// <param name="metadata">Metadata dictionary to enrich in place.</param>
+    internal static void TryAddHFCurveMetrics(
+        object autofocusInfoObj,
+        Dictionary<string, object?> metadata)
+    {
+        try
+        {
+            if (!_hfPropsResolved)
+                ResolveHFProperties(autofocusInfoObj);
+
+            // rSquared — goodness-of-fit for the focus curve.
+            var rSquared = ReadDouble(autofocusInfoObj, _rSquaredProp);
+            if (rSquared.HasValue)
+                metadata["rSquared"] = rSquared;
+
+            // curveFitting — string name of the curve fitting method (Hyperbolic, etc.).
+            var curveFitting = ReadString(autofocusInfoObj, _curveFittingProp);
+            if (curveFitting is not null)
+                metadata["curveFitting"] = curveFitting;
+
+            // starCount — number of stars used in the multi-star fit.
+            var starCount = ReadInt(autofocusInfoObj, _starCountProp);
+            if (starCount.HasValue)
+                metadata["starCount"] = starCount;
+        }
+        catch (Exception)
+        {
+            // Reflection failures degrade silently; the caller (SessionService) logs.
+        }
+    }
+
     // ── Public Build overloads ────────────────────────────────────────────────
 
     /// <summary>
