@@ -834,6 +834,16 @@ public sealed class SessionService : IDisposable, IFocuserConsumer, IGuiderConsu
 
     private void OnImageSaved(object? sender, ImageSavedEventArgs e)
     {
+        // Only process LIGHT frames; skip calibration frames (DARK, BIAS, FLAT, SNAPSHOT, …).
+        // This guard must run before any auto-session or target-change logic so that a DARK
+        // captured mid-session cannot trigger a session boundary transition.
+        var imageType = e.MetaData?.Image?.ImageType;
+        if (!FrameTypeFilter.IsLightFrame(imageType))
+        {
+            SubframesLogger.Debug($"Skipping non-LIGHT frame (type={imageType ?? "null"})");
+            return;
+        }
+
         _lastFrameTime = DateTime.UtcNow;
         var sessionId = _activeSessionId;
 

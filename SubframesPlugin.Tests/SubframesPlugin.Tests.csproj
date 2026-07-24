@@ -22,6 +22,7 @@
   -->
   <ItemGroup>
     <Compile Include="../SubframesPlugin/CatalogNameNormalizer.cs" />
+    <Compile Include="../SubframesPlugin/FrameTypeFilter.cs" />
     <Compile Include="../SubframesPlugin/Api/Dtos.cs" />
     <Compile Include="../SubframesPlugin/AutofocusEventBuilder.cs" />
   </ItemGroup>
