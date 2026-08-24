@@ -1,18 +1,43 @@
+using NINA.Core.Interfaces;
 using NINA.Equipment.Equipment.MyGuider;
 using NINA.Equipment.Interfaces.Mediator;
 
 namespace Subframes.NinaPlugin.Guiding;
 
 /// <summary>
-/// Subscribes to NINA's guider mediator, buffers PHD2 guide-step events at
-/// approximately 1 Hz, and delegates batch uploads to <see cref="GuideSampleBatchUploader"/>.
+/// Captures PHD2 guide steps from NINA and queues them for batch upload.
 ///
-/// Lifecycle: started once during plugin initialization, stopped on plugin teardown
-/// and session end. Internally creates and manages the <see cref="GuideSampleBatchUploader"/>.
+/// <para>
+/// Architecture: this class plays two distinct NINA roles simultaneously.
+/// </para>
+/// <list type="bullet">
+///   <item>
+///     <description>
+///       <see cref="IGuiderConsumer"/> — registered with <see cref="IGuiderMediator.RegisterConsumer"/>
+///       so NINA calls <see cref="UpdateDeviceInfo"/> on every guider-state change. We use
+///       this only to track the latest <see cref="GuiderInfo.PixelScale"/> value; no guide
+///       step data flows through here in NINA SDK 3.2+.
+///     </description>
+///   </item>
+///   <item>
+///     <description>
+///       <see cref="IGuiderMediator.GuideEvent"/> subscriber — PHD2 fires
+///       <c>EventHandler&lt;IGuideStep&gt;</c> on every corrected guide frame (~1 Hz).
+///       <see cref="OnGuideEvent"/> handles this, converts pixel errors to arcseconds using
+///       the cached pixel scale, and enqueues the sample for the batch uploader.
+///     </description>
+///   </item>
+/// </list>
 ///
-/// PHD2 pixel scale handling: if the pixel scale is unavailable, samples are dropped and
-/// a single per-session warning is emitted. Storing raw pixel values labelled as arcseconds
-/// would produce wrong-unit data in the guide graph, which is worse than a gap.
+/// <para>
+/// PixelScale == 0 policy: if the pixel scale has not been reported yet, the sample is
+/// dropped and a single per-session warning is logged. Storing raw pixel values labelled
+/// as arcseconds would corrupt the guide graph (wrong units). A gap is preferable.
+/// </para>
+///
+/// Lifecycle: call <see cref="StartAsync"/> once on plugin init, <see cref="StopAsync"/>
+/// on plugin teardown or session end. Internally owns and manages
+/// <see cref="GuideSampleBatchUploader"/>.
 /// </summary>
 public sealed class GuideSampleCollector : IGuiderConsumer, IDisposable, IAsyncDisposable
 {
@@ -22,6 +47,12 @@ public sealed class GuideSampleCollector : IGuiderConsumer, IDisposable, IAsyncD
     private bool _isRegistered;
     private bool _disposed;
     private bool _pixelScaleWarningLogged;
+
+    /// <summary>
+    /// Latest pixel scale (arcsec/pixel) received via <see cref="UpdateDeviceInfo"/>.
+    /// 0 means not yet reported by PHD2.
+    /// </summary>
+    private double _cachedPixelScale;
 
     public GuideSampleCollector(
         IGuiderMediator guiderMediator,
@@ -41,6 +72,9 @@ public sealed class GuideSampleCollector : IGuiderConsumer, IDisposable, IAsyncD
     {
         if (_isRegistered) return;
 
+        // Subscribe to the guide-step event BEFORE registering as a consumer so we
+        // never miss a frame that arrives while the consumer registration is in flight.
+        _guiderMediator.GuideEvent += OnGuideEvent;
         _guiderMediator.RegisterConsumer(this);
         _isRegistered = true;
         SubframesLogger.Info("GuideSampleCollector registered with guider mediator");
@@ -56,6 +90,7 @@ public sealed class GuideSampleCollector : IGuiderConsumer, IDisposable, IAsyncD
         // Flush before unregistering to avoid losing samples from an in-progress session.
         await _uploader.FlushAsync(cancellationToken);
 
+        _guiderMediator.GuideEvent -= OnGuideEvent;
         _guiderMediator.RemoveConsumer(this);
         _isRegistered = false;
         await _uploader.StopAsync(cancellationToken);
@@ -63,42 +98,57 @@ public sealed class GuideSampleCollector : IGuiderConsumer, IDisposable, IAsyncD
     }
 
     // -------------------------------------------------------------------------
-    // IGuiderConsumer
+    // IGuiderConsumer — used only to track pixel scale
     // -------------------------------------------------------------------------
 
     /// <summary>
-    /// Called by NINA on every guide step device update (~1 Hz in typical PHD2 operation).
-    /// We only collect when a Subframes session is active and a valid guide step is present.
+    /// Called by NINA whenever the guider device state changes.
+    /// In NINA SDK 3.2+, <see cref="GuiderInfo"/> no longer carries the individual
+    /// guide-step data (that now flows via <see cref="IGuiderMediator.GuideEvent"/>).
+    /// We only use this callback to keep <see cref="_cachedPixelScale"/> up to date.
     /// </summary>
-    /// <remarks>
-    /// NINA SDK 3.2+ renamed UpdateGuider() to UpdateDeviceInfo(GuiderInfo).
-    /// </remarks>
     public void UpdateDeviceInfo(GuiderInfo guiderInfo)
     {
         try
         {
-            // Guard: must actually be connected with a valid guide step.
-            if (!guiderInfo.Connected) return;
-            if (guiderInfo.GuideStep is not { } step) return;
-
-            // PHD2 exposes pixel errors; convert to arcseconds using the pixel scale.
-            // If the pixel scale is unavailable we drop the sample: storing raw pixel
-            // values labelled as arcseconds produces wrong-unit data in the guide graph,
-            // which is worse than a gap. A one-time warning is emitted so the user
-            // knows to configure the pixel scale in PHD2.
-            double raArcsec, decArcsec;
-
-            if (guiderInfo.PixelScale is double pixelScale && pixelScale > 0)
+            // Cache the pixel scale whenever NINA reports it.  PHD2 sends this once it
+            // has completed its calibration sequence; until then it may be 0.
+            if (guiderInfo.PixelScale > 0)
             {
-                // RaDistanceRaw / DecDistanceRaw are signed pixel offsets in PHD2.
-                raArcsec = step.RaDistanceRaw * pixelScale;
-                decArcsec = step.DecDistanceRaw * pixelScale;
+                _cachedPixelScale = guiderInfo.PixelScale;
             }
-            else
+        }
+        catch (Exception ex)
+        {
+            SubframesLogger.Warning($"Error caching pixel scale from GuiderInfo: {ex.Message}");
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // GuideEvent handler — actual guide-step capture
+    // -------------------------------------------------------------------------
+
+    /// <summary>
+    /// Fired by <see cref="IGuiderMediator.GuideEvent"/> once per corrected frame
+    /// (~1 Hz in typical PHD2 operation).
+    /// </summary>
+    private void OnGuideEvent(object? sender, IGuideStep guideStep)
+    {
+        try
+        {
+            var pixelScale = _cachedPixelScale;
+
+            if (pixelScale <= 0)
             {
+                // Pixel scale not yet available — drop the sample with a one-time warning.
                 LogPixelScaleWarningOnce();
                 return;
             }
+
+            // RADistanceRaw / DECDistanceRaw are signed pixel offsets (PHD2 convention).
+            // Multiply by pixel scale (arcsec/pixel) to get arcsecond errors.
+            double raArcsec  = guideStep.RADistanceRaw  * pixelScale;
+            double decArcsec = guideStep.DECDistanceRaw * pixelScale;
 
             var mapped = MappedGuideStep.FromArcseconds(
                 DateTimeOffset.UtcNow,
@@ -109,7 +159,7 @@ public sealed class GuideSampleCollector : IGuiderConsumer, IDisposable, IAsyncD
         }
         catch (Exception ex)
         {
-            // Never propagate exceptions back to NINA's mediator dispatch.
+            // Never propagate exceptions back to NINA's event dispatch.
             SubframesLogger.Warning($"Error processing guide step; sample dropped: {ex.Message}");
         }
     }
