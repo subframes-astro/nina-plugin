@@ -109,7 +109,7 @@ public sealed class GuideSampleBatchUploader : IAsyncDisposable
     // -------------------------------------------------------------------------
 
     /// <summary>Enqueue a single guide step for the next batch.</summary>
-    public void Enqueue(MappedGuideStep step) => _queue.Enqueue(step);
+    internal void Enqueue(MappedGuideStep step) => _queue.Enqueue(step);
 
     /// <summary>
     /// Drain the queue and upload all pending samples immediately.

@@ -1,5 +1,5 @@
+using NINA.Equipment.Equipment.MyGuider;
 using NINA.Equipment.Interfaces.Mediator;
-using NINA.Equipment.Model;
 
 namespace Subframes.NinaPlugin.Guiding;
 
@@ -14,7 +14,7 @@ namespace Subframes.NinaPlugin.Guiding;
 /// a single per-session warning is emitted. Storing raw pixel values labelled as arcseconds
 /// would produce wrong-unit data in the guide graph, which is worse than a gap.
 /// </summary>
-public sealed class GuideSampleCollector : IGuiderConsumer, IAsyncDisposable
+public sealed class GuideSampleCollector : IGuiderConsumer, IDisposable, IAsyncDisposable
 {
     private readonly IGuiderMediator _guiderMediator;
     private readonly GuideSampleBatchUploader _uploader;
@@ -115,8 +115,25 @@ public sealed class GuideSampleCollector : IGuiderConsumer, IAsyncDisposable
     }
 
     // -------------------------------------------------------------------------
-    // IAsyncDisposable
+    // IDisposable / IAsyncDisposable
     // -------------------------------------------------------------------------
+
+    /// <summary>
+    /// Synchronous disposal — required by <see cref="IGuiderConsumer"/> (which extends
+    /// <see cref="IDisposable"/>). Performs a best-effort flush with a 5-second timeout.
+    /// Prefer <see cref="DisposeAsync"/> where possible for a clean async flush.
+    /// </summary>
+    public void Dispose()
+    {
+        if (_disposed) return;
+        _disposed = true;
+
+        try { StopAsync(CancellationToken.None).Wait(TimeSpan.FromSeconds(5)); }
+        catch { /* StopAsync already logs; swallow here to satisfy Dispose contract */ }
+
+        try { _uploader.DisposeAsync().AsTask().Wait(TimeSpan.FromSeconds(5)); }
+        catch { /* squelch */ }
+    }
 
     public async ValueTask DisposeAsync()
     {
