@@ -88,7 +88,7 @@ public sealed class GuideSampleCollector : IGuiderConsumer, IAsyncDisposable
             // knows to configure the pixel scale in PHD2.
             double raArcsec, decArcsec;
 
-            if (guiderInfo.PixelScale is > 0 pixelScale)
+            if (guiderInfo.PixelScale is double pixelScale && pixelScale > 0)
             {
                 // RaDistanceRaw / DecDistanceRaw are signed pixel offsets in PHD2.
                 raArcsec = step.RaDistanceRaw * pixelScale;
