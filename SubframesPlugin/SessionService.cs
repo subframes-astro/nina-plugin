@@ -15,6 +15,7 @@ using NINA.WPF.Base.Interfaces.Mediator;
 using OxyPlot;
 using Subframes.NinaPlugin.Api;
 using Subframes.NinaPlugin.Data;
+using Subframes.NinaPlugin.Guiding;
 
 namespace Subframes.NinaPlugin;
 
@@ -30,7 +31,7 @@ namespace Subframes.NinaPlugin;
 /// Thread safety: the active session ID is stored in a volatile field; the
 /// event handler fires on NINA's internal thread pool so we must not block.
 /// </summary>
-public sealed class SessionService : IDisposable, IFocuserConsumer, IGuiderConsumer, ISafetyMonitorConsumer
+public sealed class SessionService : IDisposable, IFocuserConsumer, IGuiderConsumer, ISafetyMonitorConsumer, ISessionContext
 {
     private readonly IImageSaveMediator _imageSaveMediator;
     private readonly SubframesClient _apiClient;

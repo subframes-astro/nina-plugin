@@ -12,6 +12,7 @@ using NINA.Plugin;
 using NINA.Plugin.Interfaces;
 using Subframes.NinaPlugin.Api;
 using Subframes.NinaPlugin.Data;
+using Subframes.NinaPlugin.Guiding;
 using Subframes.NinaPlugin.UI;
 
 namespace Subframes.NinaPlugin;
@@ -40,6 +41,7 @@ public class SubframesPlugin : PluginBase, IPluginManifest, IPartImportsSatisfie
     private static SubframesPlugin? _primary;
 
     private readonly SessionService _sessionService;
+    private GuideSampleCollector? _guideSampleCollector;
     private readonly OptionsPanelViewModel _optionsVm;
     private readonly SubframesClient _apiClient;
     private readonly PluginOptions _options;
@@ -210,7 +212,14 @@ public class SubframesPlugin : PluginBase, IPluginManifest, IPartImportsSatisfie
         if (_isPrimary)
             SubframesLogger.Initialize();
 
-        if (!_isPrimary || SequenceMediator is null)
+        if (!_isPrimary)
+            return;
+
+        // Start the guide-sample collector so PHD2 data flows from plugin startup.
+        _guideSampleCollector = new GuideSampleCollector(_guiderMediator, _sessionService, _apiClient);
+        _ = _guideSampleCollector.StartAsync(CancellationToken.None);
+
+        if (SequenceMediator is null)
             return;
 
         if (TrySubscribeSequenceEvents())
@@ -350,6 +359,15 @@ public class SubframesPlugin : PluginBase, IPluginManifest, IPartImportsSatisfie
     {
         if (_isPrimary)
         {
+            // Stop the guide sample collector first so any buffered samples are flushed
+            // while the session is still active (before EndSessionAsync clears the session ID).
+            if (_guideSampleCollector is not null)
+            {
+                try { await _guideSampleCollector.DisposeAsync(); }
+                catch (Exception ex) { SubframesLogger.Warning($"GuideSampleCollector teardown failed: {ex.Message}"); }
+                _guideSampleCollector = null;
+            }
+
             // Always end any active session on shutdown, regardless of safety state.
             // This is the safety net for sessions kept alive during unsafe periods.
             if (_sessionService.HasActiveSession)

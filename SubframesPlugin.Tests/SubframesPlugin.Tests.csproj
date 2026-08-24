@@ -14,6 +14,9 @@
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
       <PrivateAssets>all</PrivateAssets>
     </PackageReference>
+    <!-- SQLite for DeadLetterStore tests -->
+    <PackageReference Include="Microsoft.Data.Sqlite.Core" Version="8.*" />
+    <PackageReference Include="SQLitePCLRaw.bundle_winsqlite3" Version="2.*" />
   </ItemGroup>
 
   <!--
@@ -25,6 +28,13 @@
     <Compile Include="../SubframesPlugin/FrameTypeFilter.cs" />
     <Compile Include="../SubframesPlugin/Api/Dtos.cs" />
     <Compile Include="../SubframesPlugin/AutofocusEventBuilder.cs" />
+    <!-- Guide sample subsystem: compiled directly (no NINA SDK dependencies) -->
+    <Compile Include="../SubframesPlugin/Guiding/GuideSampleModels.cs" />
+    <Compile Include="../SubframesPlugin/Guiding/ApiUploadResult.cs" />
+    <Compile Include="../SubframesPlugin/Guiding/ISessionContext.cs" />
+    <Compile Include="../SubframesPlugin/Guiding/IGuideSamplesApi.cs" />
+    <Compile Include="../SubframesPlugin/Guiding/GuideSampleBatchUploader.cs" />
+    <Compile Include="../SubframesPlugin/Api/DeadLetterStore.cs" />
   </ItemGroup>
 
 </Project>

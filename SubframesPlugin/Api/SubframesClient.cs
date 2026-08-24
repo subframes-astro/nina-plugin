@@ -1,3 +1,4 @@
+using System.Net;
 using System.Net.Http;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
@@ -5,6 +6,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using NINA.Core.Utility;
 using Subframes.NinaPlugin;
+using Subframes.NinaPlugin.Guiding;
 
 namespace Subframes.NinaPlugin.Api;
 
@@ -26,7 +28,7 @@ namespace Subframes.NinaPlugin.Api;
 /// <see cref="HttpClient.DefaultRequestHeaders"/>, which is not safe for
 /// concurrent writes from multiple heartbeat threads.
 /// </summary>
-public sealed class SubframesClient : IDisposable
+public sealed class SubframesClient : IDisposable, IGuideSamplesApi
 {
     /// <summary>
     /// Delegating handler that reads the current API key at send time and
@@ -781,4 +783,70 @@ public sealed class SubframesClient : IDisposable
     }
 
     public void Dispose() => _http.Dispose();
+
+    // ── Guide Samples ────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// POST a batch of PHD2 guide samples to POST /api/v1/ingest/guide-samples.
+    /// Returns an <see cref="ApiUploadResult"/> without throwing for expected HTTP errors.
+    /// </summary>
+    public async Task<ApiUploadResult> PostGuideSamplesAsync(
+        GuideSampleBatchRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        if (!_options.IsEnabled) return ApiUploadResult.Failure(null, isPermanent: false);
+
+        const string path = "ingest/guide-samples";
+        var url = $"{BaseUrl}/api/v1/{path}";
+
+        try
+        {
+            var jsonBytes = SerializeJson(request);
+            var content = CreateJsonContent(jsonBytes);
+            using var response = await _http.PostAsync(url, content, cancellationToken);
+
+            if (response.IsSuccessStatusCode)
+                return ApiUploadResult.Success((int)response.StatusCode);
+
+            var statusCode = (int)response.StatusCode;
+
+            if (statusCode == 429)
+            {
+                var retryAfter = ApiUploadResult.ParseRetryAfterHeader(response);
+                SubframesLogger.Warning(
+                    $"{path} rate limited (429); RetryAfter={RetryAfterStr(retryAfter)}");
+                return ApiUploadResult.RateLimit(retryAfter);
+            }
+
+            var body = await TryReadBodyAsync(response, cancellationToken);
+            SubframesLogger.Warning($"{path} POST returned {statusCode}: {body}");
+
+            return ApiUploadResult.Failure(
+                statusCode,
+                isPermanent: ApiUploadResult.IsClientError((HttpStatusCode)statusCode));
+        }
+        catch (OperationCanceledException)
+        {
+            throw; // propagate cancellation
+        }
+        catch (HttpRequestException ex)
+        {
+            SubframesLogger.Warning($"{path} POST network error: {ex.Message}");
+            return ApiUploadResult.Failure(statusCode: null, isPermanent: false);
+        }
+        catch (Exception ex)
+        {
+            SubframesLogger.Error($"{path} POST unexpected error: {ex.Message}");
+            return ApiUploadResult.Failure(statusCode: null, isPermanent: false);
+        }
+    }
+
+    private static string RetryAfterStr(TimeSpan? t) =>
+        t.HasValue ? $"{t.Value.TotalSeconds}s" : "(none)";
+
+    private static async Task<string> TryReadBodyAsync(HttpResponseMessage response, CancellationToken ct)
+    {
+        try { return await response.Content.ReadAsStringAsync(ct); }
+        catch { return "(unreadable)"; }
+    }
 }
