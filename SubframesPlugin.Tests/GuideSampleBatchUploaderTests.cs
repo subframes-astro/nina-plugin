@@ -135,8 +135,83 @@ public class GuideSampleBatchUploaderTests
     }
 
     // -------------------------------------------------------------------------
+    // SUB-2051 regression: cancellation during teardown dead-letters, doesn't block
+    // -------------------------------------------------------------------------
+
+    [Fact]
+    public async Task FlushAsync_HonoursCancellation_CompletesWithinBudget()
+    {
+        // Arrange: API that never returns (simulates unreachable endpoint at shutdown).
+        var ctx = new StubSessionContext("session-teardown");
+        var neverReturning = new NeverReturningApiClient();
+        var uploader = new GuideSampleBatchUploader(
+            neverReturning,
+            ctx,
+            flushInterval: TimeSpan.FromHours(99),
+            initialRetryDelay: TimeSpan.FromMilliseconds(1));
+
+        uploader.Enqueue(MakeSample(0.5, 0.6));
+        await uploader.StartAsync(CancellationToken.None);
+
+        // Cancel after 50 ms.
+        using var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(50));
+
+        // Act: FlushAsync should complete quickly when the CT is cancelled,
+        // not block for the full 65-second worst-case retry window.
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(
+            () => uploader.FlushAsync(cts.Token));
+        sw.Stop();
+
+        // Assert: must complete well within 1 second (generous budget for CI jitter).
+        Assert.True(sw.Elapsed < TimeSpan.FromSeconds(1),
+            $"FlushAsync took {sw.Elapsed.TotalMilliseconds:F0} ms — expected < 1000 ms");
+
+        await uploader.StopAsync(CancellationToken.None);
+    }
+
+    [Fact]
+    public async Task DisposeAsync_WithCancellationToken_CompletesWithinBudget()
+    {
+        // Arrange: API that never returns.
+        var ctx = new StubSessionContext("session-dispose");
+        var neverReturning = new NeverReturningApiClient();
+        var uploader = new GuideSampleBatchUploader(
+            neverReturning,
+            ctx,
+            flushInterval: TimeSpan.FromHours(99),
+            initialRetryDelay: TimeSpan.FromMilliseconds(1));
+
+        uploader.Enqueue(MakeSample());
+        await uploader.StartAsync(CancellationToken.None);
+
+        // Act: dispose with a 100 ms budget.
+        using var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(100));
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        await uploader.DisposeAsync(cts.Token);
+        sw.Stop();
+
+        // Assert: must not block for the 65-second worst-case window.
+        Assert.True(sw.Elapsed < TimeSpan.FromSeconds(2),
+            $"DisposeAsync took {sw.Elapsed.TotalMilliseconds:F0} ms — expected < 2000 ms");
+    }
+
+    // -------------------------------------------------------------------------
     // Stubs
     // -------------------------------------------------------------------------
+
+    private sealed class NeverReturningApiClient : IGuideSamplesApi
+    {
+        public Task<ApiUploadResult> PostGuideSamplesAsync(
+            GuideSampleBatchRequest request,
+            CancellationToken ct = default)
+        {
+            // Block until the cancellation token fires.
+            return Task.Delay(Timeout.Infinite, ct)
+                .ContinueWith(_ => ApiUploadResult.Failure(0, isPermanent: false),
+                    TaskContinuationOptions.None);
+        }
+    }
 
     private sealed class StubSessionContext : ISessionContext
     {
