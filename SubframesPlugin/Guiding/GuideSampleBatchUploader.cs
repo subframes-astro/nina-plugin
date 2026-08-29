@@ -236,7 +236,7 @@ public sealed class GuideSampleBatchUploader : IAsyncDisposable
             SubframesLogger.Info(
                 $"Guide sample flush aborted at teardown; dead-lettering {batch.Count} samples " +
                 "for retry on next launch.");
-            DeadLetter("ingest/guide-samples", request, attempt: 0);
+            DeadLetter("ingest/guide-samples", request, attempts: 0); // 0 = cancelled before any response received
             throw;   // Let StopAsync unwind cleanly
         }
     }
