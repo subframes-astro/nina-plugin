@@ -132,10 +132,16 @@ public sealed class GuideSampleBatchUploader : IAsyncDisposable
     // IAsyncDisposable
     // -------------------------------------------------------------------------
 
+    public async ValueTask DisposeAsync(CancellationToken cancellationToken)
+    {
+        await StopAsync(cancellationToken);
+        _timerCts?.Dispose();
+    }
+
+    /// <summary>Parameterless overload required by <see cref="IAsyncDisposable"/>.</summary>
     public async ValueTask DisposeAsync()
     {
-        await StopAsync(CancellationToken.None);
-        _timerCts?.Dispose();
+        await DisposeAsync(CancellationToken.None);
     }
 
     // -------------------------------------------------------------------------
@@ -204,20 +210,34 @@ public sealed class GuideSampleBatchUploader : IAsyncDisposable
             Samples = batch.Select(s => s.ToGuideSample()).ToList()
         };
 
-        var (success, finalAttempts) = await UploadWithRetryAsync(request, ct);
-
-        if (!success)
+        try
         {
-            SubframesLogger.Error(
-                $"Exhausted {finalAttempts} retry attempts for {batch.Count} guide samples " +
-                $"(session {sessionId}); moving to dead-letter store");
+            var (success, finalAttempts) = await UploadWithRetryAsync(request, ct);
 
-            DeadLetter("ingest/guide-samples", request, finalAttempts);
+            if (!success)
+            {
+                SubframesLogger.Error(
+                    $"Exhausted {finalAttempts} retry attempts for {batch.Count} guide samples " +
+                    $"(session {sessionId}); moving to dead-letter store");
+
+                DeadLetter("ingest/guide-samples", request, finalAttempts);
+            }
+            else
+            {
+                SubframesLogger.Debug(
+                    $"Successfully uploaded {batch.Count} guide samples for session {sessionId}");
+            }
         }
-        else
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
-            SubframesLogger.Debug(
-                $"Successfully uploaded {batch.Count} guide samples for session {sessionId}");
+            // Fix C (SUB-2051): teardown was cancelled before the upload completed.
+            // Preserve the batch in the dead-letter store so samples are replayed on
+            // next launch rather than silently dropped.
+            SubframesLogger.Info(
+                $"Guide sample flush aborted at teardown; dead-lettering {batch.Count} samples " +
+                "for retry on next launch.");
+            DeadLetter("ingest/guide-samples", request, attempt: 0);
+            throw;   // Let StopAsync unwind cleanly
         }
     }
 

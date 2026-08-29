@@ -185,14 +185,28 @@ public sealed class GuideSampleCollector : IGuiderConsumer, IDisposable, IAsyncD
         catch { /* squelch */ }
     }
 
-    public async ValueTask DisposeAsync()
+    /// <summary>
+    /// Asynchronous disposal.  Accepts a <paramref name="cancellationToken"/> so the
+    /// caller (typically <see cref="SubframesPlugin.Teardown"/>) can enforce a teardown
+    /// time budget and avoid blocking NINA's shutdown loop indefinitely.
+    /// Any pending samples that cannot be flushed within the budget are dead-lettered
+    /// for replay on next launch — they are never silently dropped.
+    /// </summary>
+    public async ValueTask DisposeAsync(CancellationToken cancellationToken)
     {
         if (_disposed) return;
         _disposed = true;
 
-        await StopAsync(CancellationToken.None);
-        await _uploader.DisposeAsync();
+        await StopAsync(cancellationToken);
+        await _uploader.DisposeAsync(cancellationToken);
     }
+
+    /// <summary>
+    /// Parameterless overload required by <see cref="IAsyncDisposable"/>.  Delegates
+    /// to <see cref="DisposeAsync(CancellationToken)"/> with no time limit.
+    /// Prefer the overload that accepts a token for teardown paths.
+    /// </summary>
+    public ValueTask DisposeAsync() => DisposeAsync(CancellationToken.None);
 
     // -------------------------------------------------------------------------
     // Helpers

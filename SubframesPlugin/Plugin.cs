@@ -363,8 +363,33 @@ public class SubframesPlugin : PluginBase, IPluginManifest, IPartImportsSatisfie
             // while the session is still active (before EndSessionAsync clears the session ID).
             if (_guideSampleCollector is not null)
             {
-                try { await _guideSampleCollector.DisposeAsync(); }
-                catch (Exception ex) { SubframesLogger.Warning($"GuideSampleCollector teardown failed: {ex.Message}"); }
+                // Fix A (SUB-2051): bound the async teardown with a 5 s budget so a
+                // non-responding API never holds NINA hostage on close.  The CTS
+                // propagates through DisposeAsync → StopAsync → FlushAsync →
+                // UploadWithRetryAsync, which dead-letters any pending samples on
+                // cancellation rather than silently dropping them.
+                using var teardownCts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+                try
+                {
+                    await _guideSampleCollector.DisposeAsync(teardownCts.Token).AsTask()
+                        .WaitAsync(TimeSpan.FromSeconds(6));   // belt-and-braces hard cap
+                }
+                catch (OperationCanceledException)
+                {
+                    SubframesLogger.Warning(
+                        "GuideSampleCollector teardown timed out — undispatched samples " +
+                        "deferred to dead-letter store for replay on next launch.");
+                }
+                catch (TimeoutException)
+                {
+                    SubframesLogger.Warning(
+                        "GuideSampleCollector teardown exceeded hard cap — undispatched " +
+                        "samples deferred to dead-letter store for replay on next launch.");
+                }
+                catch (Exception ex)
+                {
+                    SubframesLogger.Warning($"GuideSampleCollector teardown failed: {ex.Message}");
+                }
                 _guideSampleCollector = null;
             }
 
