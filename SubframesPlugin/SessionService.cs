@@ -45,6 +45,9 @@ public sealed class SessionService : IDisposable, IFocuserConsumer, IGuiderConsu
     private readonly ITelescopeMediator? _telescopeMediator;
     private readonly IFocuserMediator? _focuserMediator;
 
+    // HF-aware FWHM/Eccentricity extractor (SUB-2054/SUB-2057)
+    private readonly Imaging.StarAnalysisExtractor _starAnalysisExtractor = new();
+
     private volatile string? _activeSessionId;
     private volatile string? _activeSessionTargetId;
     private int _frameCounter;
@@ -123,15 +126,6 @@ public sealed class SessionService : IDisposable, IFocuserConsumer, IGuiderConsu
     // Delegate to the shared TimezoneHelper to avoid duplication.
     private static string ResolveIanaTimezone() => TimezoneHelper.ResolveIanaTimezone();
 
-    // ── Hocus Focus reflection cache ─────────────────────────────────────────
-    // FWHM and Eccentricity are not on IStarDetectionAnalysis in stock NINA 3.x;
-    // they only exist on concrete implementations (e.g. Hocus Focus plugin).
-    // We resolve the PropertyInfo once and cache it to avoid per-frame overhead.
-    private static PropertyInfo? _fwhmProp;
-    private static PropertyInfo? _eccentricityProp;
-    private static bool _fwhmResolved;
-    private static bool _eccentricityResolved;
-
     // ── IImageStatistics reflection cache ────────────────────────────────────
     // IImageStatistics is on NINA.Image which may not ship with all builds or may
     // have varying property names.  Use reflection with a per-frame cache so we
@@ -153,27 +147,6 @@ public sealed class SessionService : IDisposable, IFocuserConsumer, IGuiderConsu
     /// Returns <c>null</c> when the object is null, when no matching property exists, or when
     /// the value is not a <c>double</c>.
     /// </summary>
-    private static double? ReadReflectedDouble(object? obj, ref PropertyInfo? cached, ref bool resolved, params string[] names)
-    {
-        if (obj == null) return null;
-        if (!resolved)
-        {
-            var type = obj.GetType();
-            foreach (var name in names)
-            {
-                cached = type.GetProperty(name, BindingFlags.Public | BindingFlags.Instance);
-                if (cached != null) break;
-            }
-            resolved = true;
-            SubframesLogger.Debug(cached != null
-                ? $"Reflection: found property '{cached.Name}' on {type.Name} for FWHM/Eccentricity."
-                : $"Reflection: no FWHM/Eccentricity property found on {type.Name} — fields will be null.");
-        }
-        if (cached == null) return null;
-        var val = cached.GetValue(obj);
-        return val is double d ? d : null;
-    }
-
     /// <summary>
     /// Reads image statistics from <paramref name="e"/> via reflection.
     /// Resolves the ImageSavedEventArgs.Statistics property and its sub-properties once
@@ -921,6 +894,11 @@ public sealed class SessionService : IDisposable, IFocuserConsumer, IGuiderConsu
             var filter = meta.FilterWheel?.Filter;
             var hfr = e.StarDetectionAnalysis?.HFR;
 
+            // HF-aware FWHM/Eccentricity extraction (SUB-2054): uses StarAnalysisExtractor
+            // which handles Hocus Focus aggregate properties (AverageFWHM/AverageEccentricity)
+            // with per-star median fallback, plus generic reflection sweep for stock detectors.
+            var starAnalysis = _starAnalysisExtractor.Extract(e.StarDetectionAnalysis, sessionId);
+
             // Read guiding RMS (in-memory snapshot — no I/O, no blocking).
             double? rmsRa = null, rmsDec = null, rmsTotal = null;
             try
@@ -1031,8 +1009,8 @@ public sealed class SessionService : IDisposable, IFocuserConsumer, IGuiderConsu
                 Hfr             = NonNegative(hfr),
                 HfrStdev        = NonNegative(e.StarDetectionAnalysis?.HFRStDev),
                 StarCount       = NonNegativeInt(e.StarDetectionAnalysis?.DetectedStars),
-                Fwhm            = NonNegative(ReadReflectedDouble(e.StarDetectionAnalysis, ref _fwhmProp, ref _fwhmResolved, "FWHM", "StarFWHM")),
-                Eccentricity    = NonNegative(ReadReflectedDouble(e.StarDetectionAnalysis, ref _eccentricityProp, ref _eccentricityResolved, "Eccentricity")),
+                Fwhm            = NonNegative(starAnalysis.Fwhm),
+                Eccentricity    = NonNegative(starAnalysis.Eccentricity),
                 CameraTemp      = Finite(meta.Camera?.Temperature),
                 RmsRa           = rmsRa,
                 RmsDec          = rmsDec,

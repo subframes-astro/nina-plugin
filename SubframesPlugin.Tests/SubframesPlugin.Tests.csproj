@@ -35,6 +35,8 @@
     <Compile Include="../SubframesPlugin/Guiding/IGuideSamplesApi.cs" />
     <Compile Include="../SubframesPlugin/Guiding/GuideSampleBatchUploader.cs" />
     <Compile Include="../SubframesPlugin/Api/DeadLetterStore.cs" />
+    <!-- StarAnalysisExtractor: pure reflection, no NINA SDK dependencies -->
+    <Compile Include="../SubframesPlugin/Imaging/StarAnalysisExtractor.cs" />
   </ItemGroup>
 
 </Project>
