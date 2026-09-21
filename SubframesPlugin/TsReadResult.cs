@@ -67,7 +67,30 @@ internal readonly struct TsReadResult<T>
         _                         => "ok",
     };
 
-    /// <summary>Short, safe-to-send error summary, e.g. "SqliteException: database is locked". Null unless Status is Error.</summary>
-    public string? ToWireError() =>
-        Status == TsReadStatus.Error ? $"{ErrorType}: {ErrorMessage}" : null;
+    /// <summary>Max length of the string returned by <see cref="ToWireError"/>, including the ellipsis marker on overflow.</summary>
+    internal const int MaxWireErrorLength = 256;
+
+    private const string Ellipsis = "...";
+
+    /// <summary>
+    /// Short, safe-to-send error summary, e.g. "SqliteException: database is locked". Null unless
+    /// Status is Error. Truncated to <see cref="MaxWireErrorLength"/> characters (with a trailing
+    /// "..." marker on overflow) so a pathological exception message can't blow up the payload
+    /// sent to the backend on every heartbeat while a TS read is failing.
+    /// </summary>
+    public string? ToWireError()
+    {
+        if (Status != TsReadStatus.Error)
+        {
+            return null;
+        }
+
+        var combined = $"{ErrorType}: {ErrorMessage}";
+        if (combined.Length <= MaxWireErrorLength)
+        {
+            return combined;
+        }
+
+        return combined[..(MaxWireErrorLength - Ellipsis.Length)] + Ellipsis;
+    }
 }
