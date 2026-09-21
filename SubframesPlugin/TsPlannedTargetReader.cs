@@ -7,8 +7,9 @@ namespace Subframes.NinaPlugin;
 
 /// <summary>
 /// Reads tonight's planned targets from the Target Scheduler SQLite database.
-/// All access is best-effort: any error returns null so the session start is
-/// never blocked by TS availability or schema changes.
+/// All access is best-effort: this never throws and never blocks session start,
+/// but unlike a plain nullable return, callers get a typed status so a locked or
+/// schema-changed TS DB is distinguishable from "no TS data" downstream.
 /// </summary>
 internal static class TsPlannedTargetReader
 {
@@ -16,9 +17,11 @@ internal static class TsPlannedTargetReader
 
     /// <summary>
     /// Attempts to read active planned targets from Target Scheduler.
-    /// Returns null (silently) if TS is not installed or the DB is unreadable.
+    /// Never throws. Returns <see cref="TsReadStatus.NotInstalled"/> when TS's DB
+    /// file is absent, <see cref="TsReadStatus.Error"/> when the DB exists but
+    /// could not be read (locked/corrupt/schema change), otherwise <see cref="TsReadStatus.Ok"/>.
     /// </summary>
-    public static List<PlannedTargetInput>? ReadPlannedTargets()
+    public static TsReadResult<List<PlannedTargetInput>> ReadPlannedTargetsResult()
     {
         try
         {
@@ -26,20 +29,27 @@ internal static class TsPlannedTargetReader
             if (dbPath is null || !File.Exists(dbPath))
             {
                 SubframesLogger.Info($"Target Scheduler not detected (no database at {dbPath})");
-                return null;
+                return TsReadResult<List<PlannedTargetInput>>.NotInstalled();
             }
 
             SubframesLogger.Info($"Target Scheduler database found at {dbPath}");
             var targets = QueryTargets(dbPath);
             SubframesLogger.Info($"TS planned targets: found {targets.Count} target(s).");
-            return targets.Count > 0 ? targets : null;
+            return TsReadResult<List<PlannedTargetInput>>.Ok(targets.Count > 0 ? targets : null);
         }
         catch (Exception ex)
         {
             SubframesLogger.Warning($"TS planned targets: read failed ({ex.GetType().Name}: {ex.Message})");
-            return null;
+            return TsReadResult<List<PlannedTargetInput>>.Error(ex);
         }
     }
+
+    /// <summary>
+    /// Convenience wrapper for callers that only need the data and don't (yet)
+    /// propagate read-failure status. Prefer <see cref="ReadPlannedTargetsResult"/>
+    /// for anything reported to the backend.
+    /// </summary>
+    public static List<PlannedTargetInput>? ReadPlannedTargets() => ReadPlannedTargetsResult().Data;
 
     private static List<PlannedTargetInput> QueryTargets(string dbPath)
     {

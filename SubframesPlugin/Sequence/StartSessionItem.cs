@@ -142,9 +142,12 @@ public partial class StartSessionItem : SequenceItem, IValidatable
             SubframesLogger.Warning($"Could not read focal length for session start: {ex.Message}");
         }
 
-        var plannedTargets = TsPlannedTargetReader.ReadPlannedTargets();
+        var plannedTargetsResult = TsPlannedTargetReader.ReadPlannedTargetsResult();
+        var plannedTargets = plannedTargetsResult.Data;
         if (plannedTargets is not null)
             SubframesLogger.Info($"Including {plannedTargets.Count} planned target(s) from Target Scheduler in session start");
+        else if (plannedTargetsResult.Status == TsReadStatus.Error)
+            SubframesLogger.Warning($"TS planned targets read failed for session start: {plannedTargetsResult.ToWireError()}");
         else
             SubframesLogger.Info("No Target Scheduler planned targets to include in session start");
 
@@ -167,6 +170,8 @@ public partial class StartSessionItem : SequenceItem, IValidatable
             SensorHeightPx       = sensorHeightPx,
             FocalLengthMm        = focalLengthMm,
             PlannedTargets       = plannedTargets,
+            PlannedTargetsStatus = plannedTargetsResult.ToWireStatus(),
+            PlannedTargetsError  = plannedTargetsResult.ToWireError(),
             Timezone             = timezone,
         };
 

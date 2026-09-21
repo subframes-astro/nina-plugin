@@ -81,6 +81,21 @@ public sealed record class StartSessionRequest
     public List<PlannedTargetInput>? PlannedTargets { get; init; }
 
     /// <summary>
+    /// Read status of the Target Scheduler planned-targets query at session start:
+    /// <c>"ok"</c> | <c>"not_installed"</c> | <c>"error"</c>. Lets the backend/UI
+    /// distinguish "TS has no active targets" from "TS DB read failed" instead of
+    /// treating both as a silent absence of <see cref="PlannedTargets"/>.
+    /// </summary>
+    [JsonPropertyName("plannedTargetsStatus")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? PlannedTargetsStatus { get; init; }
+
+    /// <summary>Short error summary when <see cref="PlannedTargetsStatus"/> is <c>"error"</c>; otherwise null.</summary>
+    [JsonPropertyName("plannedTargetsError")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? PlannedTargetsError { get; init; }
+
+    /// <summary>
     /// IANA timezone identifier for the host machine (e.g. "America/New_York").
     /// Empty string when conversion from the Windows timezone ID failed;
     /// the backend falls back to UTC in that case.
@@ -440,11 +455,28 @@ public sealed class StationHeartbeatRequest
     /// <summary>
     /// Target Scheduler availability state: <c>"none"</c> (not installed) |
     /// <c>"no_api"</c> (installed, API disabled) | <c>"active"</c> (installed, API enabled).
-    /// Sent on every heartbeat.
+    /// Sent on every heartbeat. This reflects the TS local HTTP API probe, not the
+    /// SQLite DB read used for <see cref="TsProgressSnapshot"/>/<see cref="TsProgressDelta"/> —
+    /// see <see cref="TsProgressReadStatus"/> for that.
     /// </summary>
     [JsonPropertyName("tsAvailabilityState")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? TsAvailabilityState { get; init; }
+
+    /// <summary>
+    /// Read status of the TS progress SQLite query for this heartbeat:
+    /// <c>"ok"</c> | <c>"not_installed"</c> | <c>"error"</c>. Distinguishes "TS DB has no
+    /// changes to report" from "TS DB read failed" (locked/corrupt/schema-changed file),
+    /// both of which otherwise present as absent <see cref="TsProgressSnapshot"/>/<see cref="TsProgressDelta"/>.
+    /// </summary>
+    [JsonPropertyName("tsProgressReadStatus")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? TsProgressReadStatus { get; init; }
+
+    /// <summary>Short error summary when <see cref="TsProgressReadStatus"/> is <c>"error"</c>; otherwise null.</summary>
+    [JsonPropertyName("tsProgressReadError")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? TsProgressReadError { get; init; }
 
     /// <summary>
     /// Tonight's TS scheduling preview. Only sent when <see cref="TsAvailabilityState"/> is
