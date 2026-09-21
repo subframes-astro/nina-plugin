@@ -10,8 +10,9 @@ namespace Subframes.NinaPlugin;
 /// Supports a full snapshot read (for the first station heartbeat) and an incremental
 /// delta read (for subsequent heartbeats) based on SQLite file mtime change detection.
 ///
-/// All access is best-effort: any error returns null so callers are never blocked
-/// by TS availability or schema changes.
+/// All access is best-effort: this never throws or blocks callers, but read failures
+/// (locked/corrupt/schema-changed DB) are reported via the typed <c>*Result</c>
+/// overloads instead of being indistinguishable from "no TS data".
 /// </summary>
 internal static class TsProgressReader
 {
@@ -27,10 +28,19 @@ internal static class TsProgressReader
 
     /// <summary>
     /// Reads the full TS progress state and caches it for future delta calls.
-    /// Returns null if TS is not installed, the DB is unreadable, or no rows exist.
+    /// Never throws. See <see cref="ReadProgressSnapshotResult"/> for the typed form;
+    /// this convenience overload collapses "not installed", "no rows", and "read error"
+    /// down to null, matching the previous best-effort contract.
     /// Call this on the first station heartbeat after plugin init or reconnection.
     /// </summary>
-    public static TsProgressSnapshotDto? ReadProgressSnapshot()
+    public static TsProgressSnapshotDto? ReadProgressSnapshot() => ReadProgressSnapshotResult().Data;
+
+    /// <summary>
+    /// Typed form of <see cref="ReadProgressSnapshot"/>: reports whether TS is not
+    /// installed, the read failed (locked/corrupt/schema-changed DB), or it succeeded
+    /// (data may be null if there are simply no rows to report).
+    /// </summary>
+    public static TsReadResult<TsProgressSnapshotDto> ReadProgressSnapshotResult()
     {
         try
         {
@@ -38,24 +48,24 @@ internal static class TsProgressReader
             if (dbPath is null || !File.Exists(dbPath))
             {
                 SubframesLogger.Info($"TS progress snapshot: DB not found at {dbPath ?? "(null)"} — Target Scheduler not installed or DB path mismatch.");
-                return null;
+                return TsReadResult<TsProgressSnapshotDto>.NotInstalled();
             }
 
             var rows = QueryProgress(dbPath);
             if (rows.Count == 0)
-                return null;
+                return TsReadResult<TsProgressSnapshotDto>.Ok(null);
 
             var snapshot = ToSnapshotDict(rows);
             _lastSnapshot = snapshot;
             _lastMtime = SafeGetMtime(dbPath);
 
             SubframesLogger.Info($"TS progress snapshot: {rows.Count} row(s).");
-            return new TsProgressSnapshotDto { Rows = ToRowDtos(rows) };
+            return TsReadResult<TsProgressSnapshotDto>.Ok(new TsProgressSnapshotDto { Rows = ToRowDtos(rows) });
         }
         catch (Exception ex)
         {
             SubframesLogger.Warning($"TS progress snapshot: read skipped ({ex.GetType().Name}: {ex.Message})");
-            return null;
+            return TsReadResult<TsProgressSnapshotDto>.Error(ex);
         }
     }
 
@@ -63,9 +73,17 @@ internal static class TsProgressReader
     /// Checks whether the TS database has changed since the last read (via file mtime).
     /// If unchanged, returns null immediately (no DB read, zero overhead).
     /// If changed, re-reads progress, diffs against the previous snapshot, and returns
-    /// the delta (upserts + removals). Returns null if TS is not installed or unreadable.
+    /// the delta (upserts + removals). Returns null if TS is not installed or unreadable;
+    /// use <see cref="ReadProgressDeltaResult"/> to distinguish those cases.
     /// </summary>
-    public static TsProgressDeltaDto? ReadProgressDelta()
+    public static TsProgressDeltaDto? ReadProgressDelta() => ReadProgressDeltaResult().Data;
+
+    /// <summary>
+    /// Typed form of <see cref="ReadProgressDelta"/>. "No change since last read" and
+    /// "no rows at all" both report <see cref="TsReadStatus.Ok"/> with null data — they
+    /// aren't errors. Only a genuine read failure reports <see cref="TsReadStatus.Error"/>.
+    /// </summary>
+    public static TsReadResult<TsProgressDeltaDto> ReadProgressDeltaResult()
     {
         try
         {
@@ -73,15 +91,15 @@ internal static class TsProgressReader
             if (dbPath is null || !File.Exists(dbPath))
             {
                 SubframesLogger.Info($"TS progress delta: DB not found at {dbPath ?? "(null)"} — Target Scheduler not installed or DB path mismatch.");
-                return null;
+                return TsReadResult<TsProgressDeltaDto>.NotInstalled();
             }
 
             var currentMtime = SafeGetMtime(dbPath);
             if (currentMtime == DateTime.MinValue)
-                return null; // mtime unavailable — skip silently
+                return TsReadResult<TsProgressDeltaDto>.Ok(null); // mtime unavailable — skip silently, not an error
 
             if (currentMtime == _lastMtime)
-                return null; // no change
+                return TsReadResult<TsProgressDeltaDto>.Ok(null); // no change
 
             // File has changed — re-read and diff.
             var rows = QueryProgress(dbPath);
@@ -95,16 +113,16 @@ internal static class TsProgressReader
             if (delta.Upserts.Count == 0 && delta.Removals.Count == 0)
             {
                 SubframesLogger.Info("TS progress: mtime changed but no row differences found.");
-                return null;
+                return TsReadResult<TsProgressDeltaDto>.Ok(null);
             }
 
             SubframesLogger.Info($"TS progress delta: {delta.Upserts.Count} upsert(s), {delta.Removals.Count} removal(s).");
-            return delta;
+            return TsReadResult<TsProgressDeltaDto>.Ok(delta);
         }
         catch (Exception ex)
         {
             SubframesLogger.Warning($"TS progress delta: read skipped ({ex.GetType().Name}: {ex.Message})");
-            return null;
+            return TsReadResult<TsProgressDeltaDto>.Error(ex);
         }
     }
 
@@ -120,10 +138,17 @@ internal static class TsProgressReader
 
     /// <summary>
     /// Attempts to read all-time progress entries from Target Scheduler.
-    /// Returns null (silently) if TS is not installed or the DB is unreadable.
+    /// Never throws. See <see cref="ReadProgressResult"/> for the typed form.
     /// Used at session end — does not update the heartbeat cache.
     /// </summary>
-    public static List<TsProgressInput>? ReadProgress()
+    public static List<TsProgressInput>? ReadProgress() => ReadProgressResult().Data;
+
+    /// <summary>
+    /// Typed form of <see cref="ReadProgress"/>: distinguishes "TS not installed" from
+    /// "TS installed but the DB read failed" so a session-end summary can report why
+    /// no progress rows were attached instead of silently omitting them.
+    /// </summary>
+    public static TsReadResult<List<TsProgressInput>> ReadProgressResult()
     {
         try
         {
@@ -131,17 +156,17 @@ internal static class TsProgressReader
             if (dbPath is null || !File.Exists(dbPath))
             {
                 SubframesLogger.Info($"Target Scheduler not detected (no database at {dbPath})");
-                return null;
+                return TsReadResult<List<TsProgressInput>>.NotInstalled();
             }
 
             var entries = QueryProgress(dbPath);
             SubframesLogger.Info($"TS progress: found {entries.Count} row(s).");
-            return entries.Count > 0 ? entries : null;
+            return TsReadResult<List<TsProgressInput>>.Ok(entries.Count > 0 ? entries : null);
         }
         catch (Exception ex)
         {
             SubframesLogger.Warning($"TS progress: read skipped ({ex.GetType().Name}: {ex.Message})");
-            return null;
+            return TsReadResult<List<TsProgressInput>>.Error(ex);
         }
     }
 

@@ -411,8 +411,10 @@ public sealed class SessionService : IDisposable, IFocuserConsumer, IGuiderConsu
         var sessionEnd = DateTime.UtcNow;
         var tsGrading  = TsGradingReader.ReadGradingResults(_sessionStartTime, sessionEnd);
         SubframesLogger.Info($"TS grading results: {tsGrading?.Count ?? 0} entry/entries.");
-        var tsProgress = TsProgressReader.ReadProgress();
-        SubframesLogger.Info($"TS progress results: {tsProgress?.Count ?? 0} row(s).");
+        var tsProgress = TsProgressReader.ReadProgressResult();
+        SubframesLogger.Info($"TS progress results: {tsProgress.Data?.Count ?? 0} row(s).");
+        if (tsProgress.Status == TsReadStatus.Error)
+            SubframesLogger.Warning($"TS progress read failed at session end: {tsProgress.ToWireError()}");
 
         _activeSessionId       = null;
         _activeLocalSessionId  = null;
@@ -428,10 +430,10 @@ public sealed class SessionService : IDisposable, IFocuserConsumer, IGuiderConsu
             await _apiClient.PostTsGradingAsync(sessionId, tsGrading, ct);
         }
 
-        if (tsProgress is { Count: > 0 })
+        if (tsProgress.Data is { Count: > 0 } tsProgressRows)
         {
-            SubframesLogger.Info($"Sending {tsProgress.Count} TS progress row(s) to API.");
-            await _apiClient.PostTsProgressAsync(sessionId, tsProgress, ct);
+            SubframesLogger.Info($"Sending {tsProgressRows.Count} TS progress row(s) to API.");
+            await _apiClient.PostTsProgressAsync(sessionId, tsProgressRows, ct);
         }
 
         // Mark session fully synced so CacheReplayEngine skips it next pass.
@@ -727,7 +729,10 @@ public sealed class SessionService : IDisposable, IFocuserConsumer, IGuiderConsu
             var hasTarget = !string.IsNullOrWhiteSpace(targetName) && !(targetRa == 0 && targetDec == 0);
             var resolvedTarget = hasTarget ? targetName! : string.Empty;
 
-            var plannedTargets = TsPlannedTargetReader.ReadPlannedTargets();
+            var plannedTargetsResult = TsPlannedTargetReader.ReadPlannedTargetsResult();
+            var plannedTargets = plannedTargetsResult.Data;
+            if (plannedTargetsResult.Status == TsReadStatus.Error)
+                SubframesLogger.Warning($"TS planned targets read failed for auto-session start: {plannedTargetsResult.ToWireError()}");
 
             string? profileName = null;
             try { profileName = ActiveProfileNameResolver?.Invoke(); } catch { /* best effort */ }
@@ -742,6 +747,8 @@ public sealed class SessionService : IDisposable, IFocuserConsumer, IGuiderConsu
                 InstanceName          = string.IsNullOrWhiteSpace(options.InstanceName) ? null : options.InstanceName,
                 EquipmentProfileName  = string.IsNullOrWhiteSpace(profileName) ? null : profileName,
                 PlannedTargets        = plannedTargets,
+                PlannedTargetsStatus  = plannedTargetsResult.ToWireStatus(),
+                PlannedTargetsError   = plannedTargetsResult.ToWireError(),
                 Timezone              = ResolveIanaTimezone(),
             };
 

@@ -1221,16 +1221,24 @@ public class SubframesPlugin : PluginBase, IPluginManifest, IPartImportsSatisfie
         // Reads directly from the TS SQLite DB — available from plugin startup, no session required.
         TsProgressSnapshotDto? tsSnapshot = null;
         TsProgressDeltaDto? tsDelta = null;
+        string? tsProgressReadStatus = null;
+        string? tsProgressReadError = null;
         try
         {
             if (_tsFirstBeat)
             {
-                tsSnapshot = TsProgressReader.ReadProgressSnapshot();
+                var result = TsProgressReader.ReadProgressSnapshotResult();
+                tsSnapshot = result.Data;
+                tsProgressReadStatus = result.ToWireStatus();
+                tsProgressReadError = result.ToWireError();
                 _tsFirstBeat = false;
             }
             else
             {
-                tsDelta = TsProgressReader.ReadProgressDelta();
+                var result = TsProgressReader.ReadProgressDeltaResult();
+                tsDelta = result.Data;
+                tsProgressReadStatus = result.ToWireStatus();
+                tsProgressReadError = result.ToWireError();
             }
         }
         catch (Exception ex)
@@ -1249,6 +1257,8 @@ public class SubframesPlugin : PluginBase, IPluginManifest, IPartImportsSatisfie
             Location            = location,
             TsProgressSnapshot  = tsSnapshot,
             TsProgressDelta     = tsDelta,
+            TsProgressReadStatus = tsProgressReadStatus,
+            TsProgressReadError  = tsProgressReadError,
             TsAvailabilityState = _tsDetector?.CurrentState,
             // Prefer the cached initial night preview (full schedule from session
             // start) over _currentTsPreview which degrades mid-session as the TS
