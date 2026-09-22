@@ -124,6 +124,16 @@ public sealed class PlannedTargetInput
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? ProjectName { get; init; }
 
+    /// <summary>TS SQLite Target.Id primary key. Null when unavailable (e.g. older TS schema).</summary>
+    [JsonPropertyName("tsTargetId")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public long? TsTargetId { get; init; }
+
+    /// <summary>TS SQLite Project.Id primary key. Null when unavailable (e.g. older TS schema).</summary>
+    [JsonPropertyName("tsProjectId")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public long? TsProjectId { get; init; }
+
     [JsonPropertyName("plannedFilters")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public List<string>? PlannedFilters { get; init; }
@@ -500,6 +510,16 @@ public sealed class TsProgressRowDto
     [JsonPropertyName("filterName")]
     public required string FilterName { get; init; }
 
+    /// <summary>TS SQLite Target.Id primary key. Null when unavailable (e.g. older TS schema).</summary>
+    [JsonPropertyName("tsTargetId")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public long? TsTargetId { get; init; }
+
+    /// <summary>TS SQLite Project.Id primary key. Null when unavailable (e.g. older TS schema).</summary>
+    [JsonPropertyName("tsProjectId")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public long? TsProjectId { get; init; }
+
     [JsonPropertyName("desired")]
     public int Desired { get; init; }
 
@@ -522,6 +542,16 @@ public sealed class TsProgressRemovalKeyDto
 
     [JsonPropertyName("filterName")]
     public required string FilterName { get; init; }
+
+    /// <summary>TS SQLite Target.Id primary key. Null when unavailable (e.g. older TS schema).</summary>
+    [JsonPropertyName("tsTargetId")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public long? TsTargetId { get; init; }
+
+    /// <summary>TS SQLite Project.Id primary key. Null when unavailable (e.g. older TS schema).</summary>
+    [JsonPropertyName("tsProjectId")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public long? TsProjectId { get; init; }
 }
 
 /// <summary>Full TS progress dump sent on first heartbeat after init or reconnection.</summary>
@@ -862,6 +892,16 @@ public sealed class TsProgressInput
 
     [JsonPropertyName("filterName")]
     public required string FilterName { get; init; }
+
+    /// <summary>TS SQLite Target.Id primary key. Null when unavailable (e.g. older TS schema).</summary>
+    [JsonPropertyName("tsTargetId")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public long? TsTargetId { get; init; }
+
+    /// <summary>TS SQLite Project.Id primary key. Null when unavailable (e.g. older TS schema).</summary>
+    [JsonPropertyName("tsProjectId")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public long? TsProjectId { get; init; }
 
     [JsonPropertyName("desired")]
     public int Desired { get; init; }

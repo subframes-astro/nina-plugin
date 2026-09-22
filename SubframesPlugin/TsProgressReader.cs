@@ -105,7 +105,7 @@ internal static class TsProgressReader
             var rows = QueryProgress(dbPath);
             var currentSnapshot = ToSnapshotDict(rows);
 
-            var delta = ComputeDelta(_lastSnapshot, currentSnapshot);
+            var delta = ComputeDelta(_lastSnapshot, currentSnapshot, ToIdLookup(rows));
 
             _lastSnapshot = currentSnapshot;
             _lastMtime = currentMtime;
@@ -186,6 +186,16 @@ internal static class TsProgressReader
         return dict;
     }
 
+    // Key -> (TsProjectId, TsTargetId), populated alongside the snapshot dict so delta
+    // upserts/removals can carry the SQLite PKs without changing the diff key shape.
+    private static Dictionary<(string?, string, string), (long?, long?)> ToIdLookup(List<TsProgressInput> rows)
+    {
+        var dict = new Dictionary<(string?, string, string), (long?, long?)>(rows.Count);
+        foreach (var r in rows)
+            dict[(r.ProjectName, r.TargetName, r.FilterName)] = (r.TsProjectId, r.TsTargetId);
+        return dict;
+    }
+
     private static List<TsProgressRowDto> ToRowDtos(List<TsProgressInput> rows)
     {
         var dtos = new List<TsProgressRowDto>(rows.Count);
@@ -198,13 +208,16 @@ internal static class TsProgressReader
                 Desired     = r.Desired,
                 Acquired    = r.Acquired,
                 Accepted    = r.Accepted,
+                TsProjectId = r.TsProjectId,
+                TsTargetId  = r.TsTargetId,
             });
         return dtos;
     }
 
     private static TsProgressDeltaDto ComputeDelta(
         Dictionary<(string?, string, string), (int, int, int)>? previous,
-        Dictionary<(string?, string, string), (int, int, int)> current)
+        Dictionary<(string?, string, string), (int, int, int)> current,
+        Dictionary<(string?, string, string), (long?, long?)> currentIds)
     {
         var upserts  = new List<TsProgressRowDto>();
         var removals = new List<TsProgressRemovalKeyDto>();
@@ -214,6 +227,7 @@ internal static class TsProgressReader
         {
             if (previous is null || !previous.TryGetValue(key, out var prevVals) || prevVals != vals)
             {
+                currentIds.TryGetValue(key, out var ids);
                 upserts.Add(new TsProgressRowDto
                 {
                     ProjectName = key.Item1,
@@ -222,6 +236,8 @@ internal static class TsProgressReader
                     Desired     = vals.Item1,
                     Acquired    = vals.Item2,
                     Accepted    = vals.Item3,
+                    TsProjectId = ids.Item1,
+                    TsTargetId  = ids.Item2,
                 });
             }
         }
@@ -266,7 +282,9 @@ internal static class TsProgressReader
                 et.filtername     AS filterName,
                 COALESCE(ep.Desired,  0) AS desired,
                 COALESCE(ep.Accepted, 0) AS accepted,
-                COALESCE(ep.Acquired, 0) AS acquired
+                COALESCE(ep.Acquired, 0) AS acquired,
+                p.Id              AS projectId,
+                t.Id              AS targetId
             FROM ExposurePlan ep
             JOIN Target            t  ON t.Id  = ep.targetid
             JOIN Project           p  ON p.Id  = t.projectid
@@ -289,6 +307,8 @@ internal static class TsProgressReader
             var desired     = reader.IsDBNull(3) ? 0 : reader.GetInt32(3);
             var accepted    = reader.IsDBNull(4) ? 0 : reader.GetInt32(4);
             var acquired    = reader.IsDBNull(5) ? 0 : reader.GetInt32(5);
+            var projectId   = reader.IsDBNull(6) ? (long?)null : reader.GetInt64(6);
+            var targetId    = reader.IsDBNull(7) ? (long?)null : reader.GetInt64(7);
 
             if (string.IsNullOrWhiteSpace(targetName) || string.IsNullOrWhiteSpace(filterName))
                 continue;
@@ -301,6 +321,8 @@ internal static class TsProgressReader
                 Desired     = desired,
                 Accepted    = accepted,
                 Acquired    = acquired,
+                TsProjectId = projectId,
+                TsTargetId  = targetId,
             });
         }
 

@@ -71,7 +71,9 @@ internal static class TsPlannedTargetReader
                 p.Name          AS projectName,
                 et.filtername   AS filterName,
                 ep.exposure     AS exposureSec,
-                t.rotation      AS rotation
+                t.rotation      AS rotation,
+                t.Id            AS targetId,
+                p.Id            AS projectId
             FROM Target t
             JOIN Project          p  ON p.Id  = t.projectid
             LEFT JOIN ExposurePlan ep ON ep.targetid = t.Id
@@ -97,13 +99,15 @@ internal static class TsPlannedTargetReader
             var filterName  = reader.IsDBNull(2) ? null : reader.GetString(2);
             var expSec      = reader.IsDBNull(3) ? (double?)null : reader.GetDouble(3);
             var rotation    = reader.IsDBNull(4) ? (double?)null : reader.GetDouble(4);
+            var targetId    = reader.IsDBNull(5) ? (long?)null : reader.GetInt64(5);
+            var projectId   = reader.IsDBNull(6) ? (long?)null : reader.GetInt64(6);
 
             if (string.IsNullOrWhiteSpace(targetName)) continue;
 
             var key = $"{projectName ?? ""}|{targetName}";
             if (!grouped.TryGetValue(key, out var acc))
             {
-                acc = new TargetAccumulator(targetName, projectName, rotation);
+                acc = new TargetAccumulator(targetName, projectName, rotation, targetId, projectId);
                 grouped[key] = acc;
             }
 
@@ -118,7 +122,7 @@ internal static class TsPlannedTargetReader
             .ToList();
     }
 
-    private sealed class TargetAccumulator(string targetName, string? projectName, double? rotation)
+    private sealed class TargetAccumulator(string targetName, string? projectName, double? rotation, long? targetId, long? projectId)
     {
         private readonly List<string> _filters = [];
         private readonly List<double> _expSecs  = [];
@@ -138,6 +142,8 @@ internal static class TsPlannedTargetReader
             PlannedFilters       = _filters.Count > 0 ? [.. _filters] : null,
             EstimatedExposureSec = _expSecs.Count > 0 ? _expSecs.Average() : null,
             CameraRotation       = rotation,
+            TsTargetId           = targetId,
+            TsProjectId          = projectId,
         };
     }
 }
