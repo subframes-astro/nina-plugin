@@ -71,6 +71,15 @@ public partial class StartSessionItem : SequenceItem, IValidatable
         IProgress<ApplicationStatus> progress,
         CancellationToken ct)
     {
+        // Same-night restart: a session parked as "waiting" after the previous sequence
+        // stopped is reused (keeps planned-target / TS context) instead of opening a new one.
+        if (_sessionService.HasParkedSession)
+        {
+            SubframesLogger.Info("StartSessionItem: reusing parked session from earlier sequence run.");
+            await _sessionService.ResumeFromWaitingAsync();
+            return;
+        }
+
         // Resolve target from the sequence tree when the user left the default
         // "Unknown Target" or when RA/Dec are both zero (no real coordinates).
         // This walks sibling DSO containers (e.g. in the TargetAreaContainer)
