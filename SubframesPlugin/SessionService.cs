@@ -63,6 +63,17 @@ public sealed class SessionService : IDisposable, IFocuserConsumer, IGuiderConsu
 
     // Heartbeat timer state
     private volatile string? _currentTarget;
+    // Coordinates (degrees) of _currentTarget as registered via StartTargetAsync; (0,0) = unknown.
+    private double _currentTargetRa;
+    private double _currentTargetDec;
+    // Serialises OnTargetDetectedAsync so concurrent callers (ImageSaved, heartbeat poll,
+    // DSO container events) cannot both pass the "same target" check (SUB-2184).
+    private readonly SemaphoreSlim _targetDetectLock = new(1, 1);
+    // Set when the sequence stopped before dawn and the session is parked as "waiting".
+    private DateTime? _sequenceStoppedAt;
+    // True while the server has been told "waiting" (independent of the local _sessionStatus,
+    // which StartTargetAsync flips back to "active").
+    private volatile bool _serverWaiting;
     // Snapshot updated on each ImageSaved; volatile reference guarantees atomic swap.
     private volatile HeartbeatSnapshot _snapshot = new(null, null, null);
     private DateTime _sessionStartTime;
@@ -420,6 +431,10 @@ public sealed class SessionService : IDisposable, IFocuserConsumer, IGuiderConsu
         _activeLocalSessionId  = null;
         _activeSessionTargetId = null;
         _activeLocalTargetId   = null;
+        _currentTargetRa       = 0;
+        _currentTargetDec      = 0;
+        _sequenceStoppedAt     = null;
+        _serverWaiting         = false;
         _isManualSession       = false;
         _sessionStatus = "active";
         await _apiClient.EndSessionAsync(sessionId, skipped, failed, ct);
@@ -538,7 +553,10 @@ public sealed class SessionService : IDisposable, IFocuserConsumer, IGuiderConsu
         _activeLocalTargetId   = localTargetId;
         _activeSessionTargetId = targetId;
         _currentTarget         = targetName;
+        _currentTargetRa       = targetRa;
+        _currentTargetDec      = targetDec;
         _sessionStatus         = "active";
+        _sequenceStoppedAt     = null;
 
         if (targetId is not null)
         {
@@ -611,6 +629,7 @@ public sealed class SessionService : IDisposable, IFocuserConsumer, IGuiderConsu
         if (sessionId is null) return;
 
         _sessionStatus = status;
+        _serverWaiting = string.Equals(status, "waiting", StringComparison.OrdinalIgnoreCase);
 
         var request = new UpdateSessionStatusRequest
         {
@@ -633,8 +652,7 @@ public sealed class SessionService : IDisposable, IFocuserConsumer, IGuiderConsu
     /// </summary>
     public async Task OnTargetDetectedAsync(string targetName, double targetRa, double targetDec)
     {
-        var sessionId = _activeSessionId;
-        if (sessionId is null) return;
+        if (_activeSessionId is null) return;
 
         var normalized = CatalogNameNormalizer.Normalize(targetName);
 
@@ -642,29 +660,75 @@ public sealed class SessionService : IDisposable, IFocuserConsumer, IGuiderConsu
         if (string.Equals(normalized, "Unknown Target", StringComparison.OrdinalIgnoreCase))
             return;
 
-        // Same target AND a server-side target already exists — nothing to do.
-        // If _activeSessionTargetId is null, we still need to register the target
-        // even when the name matches (e.g. session was opened with "M42" but no
-        // explicit StartTargetItem was used — the first frame must create it).
-        if (_activeSessionTargetId is not null
-            && !string.IsNullOrEmpty(_currentTarget)
-            && string.Equals(CatalogNameNormalizer.Normalize(_currentTarget), normalized, StringComparison.OrdinalIgnoreCase))
-            return;
-
-        SubframesLogger.Info($"Target detected: '{normalized}' (was '{_currentTarget ?? "none"}')");
-
-        // End current target if one is active.
-        if (_activeSessionTargetId is not null)
+        // Serialise: ImageSaved (fire-and-forget), the heartbeat poll and DSO container
+        // events can all land here concurrently.
+        await _targetDetectLock.WaitAsync().ConfigureAwait(false);
+        try
         {
-            try { await EndTargetAsync(CancellationToken.None); }
-            catch (Exception ex) { SubframesLogger.Warning($"EndTarget failed during target detection: {ex.Message}"); }
+            var sessionId = _activeSessionId;
+            if (sessionId is null) return;
+
+            // A target row exists if EITHER the server acked it OR it is cached locally
+            // (offline / StartTarget failed). Checking only the server id re-registered the
+            // same target on every frame whenever the API returned null (SUB-2184 root cause).
+            var hasActiveTarget = _activeSessionTargetId is not null || _activeLocalTargetId is not null;
+
+            if (TargetBlockPolicy.IsSameTarget(
+                    hasActiveTarget,
+                    _currentTarget, _currentTargetRa, _currentTargetDec,
+                    normalized, targetRa, targetDec))
+                return;
+
+            SubframesLogger.Info($"Target detected: '{normalized}' (was '{_currentTarget ?? "none"}')");
+
+            // End current target if one is active.
+            if (hasActiveTarget)
+            {
+                try { await EndTargetAsync(CancellationToken.None).ConfigureAwait(false); }
+                catch (Exception ex) { SubframesLogger.Warning($"EndTarget failed during target detection: {ex.Message}"); }
+            }
+
+            // Register the new target.
+            await StartTargetAsync(normalized, targetRa, targetDec, null, CancellationToken.None).ConfigureAwait(false);
+
+            // Fire an immediate heartbeat so the web app reflects the change right away.
+            FireImmediateHeartbeat(sessionId);
         }
+        finally
+        {
+            _targetDetectLock.Release();
+        }
+    }
 
-        // Register the new target.
-        await StartTargetAsync(normalized, targetRa, targetDec, null, CancellationToken.None);
+    // ── Waiting / resume (sequence stop before dawn) ─────────────────────────
 
-        // Fire an immediate heartbeat so the web app reflects the change right away.
-        FireImmediateHeartbeat(sessionId);
+    /// <summary>True when a session is open and parked as "waiting" after a sequence stop.</summary>
+    public bool HasParkedSession => _activeSessionId is not null && _sequenceStoppedAt is not null;
+
+    /// <summary>
+    /// Called when the sequence finished before dawn: parks the session as "waiting"
+    /// (keeping planned-target / TS context) instead of ending it, so a restart on the
+    /// same night reuses it. No-op when no session is active.
+    /// </summary>
+    public async Task MarkSequenceStoppedAsync()
+    {
+        if (_activeSessionId is null) return;
+        _sequenceStoppedAt = DateTime.UtcNow;
+        try { await UpdateStatusAsync("waiting", "sequence stopped"); }
+        catch (Exception ex) { SubframesLogger.Warning($"Mark waiting failed: {ex.Message}"); }
+    }
+
+    /// <summary>
+    /// Returns a "waiting" session to "active" (new sequence start or a new frame).
+    /// No-op unless the session is currently waiting.
+    /// </summary>
+    public async Task ResumeFromWaitingAsync()
+    {
+        if (_activeSessionId is null) return;
+        _sequenceStoppedAt = null;
+        if (!_serverWaiting) return;
+        try { await UpdateStatusAsync("active"); }
+        catch (Exception ex) { SubframesLogger.Warning($"Resume from waiting failed: {ex.Message}"); }
     }
 
     /// <summary>
@@ -714,7 +778,13 @@ public sealed class SessionService : IDisposable, IFocuserConsumer, IGuiderConsu
     /// </summary>
     public async Task OnSequenceStartedAsync(string? targetName, double targetRa, double targetDec)
     {
-        if (_isManualSession || _activeSessionId is not null) return;
+        if (_activeSessionId is not null)
+        {
+            // Same-night restart: reuse the parked session (keeps planned/TS context).
+            await ResumeFromWaitingAsync();
+            return;
+        }
+        if (_isManualSession) return;
 
         var options = PluginOptions.Load();
         if (!options.IsEnabled || !options.AutoSessionDetection) return;
@@ -846,20 +916,15 @@ public sealed class SessionService : IDisposable, IFocuserConsumer, IGuiderConsu
                     return;
                 }
 
-                // Session was started from sequence start without a known target —
-                // adopt the real target name from this first exposure.
-                if (string.IsNullOrEmpty(_currentTarget))
-                    _currentTarget = targetName;
-
-                // Active auto-session — check for target change.
-                var normalizedCurrent = string.IsNullOrEmpty(_currentTarget)
-                    ? string.Empty
-                    : CatalogNameNormalizer.Normalize(_currentTarget);
-                if (!string.IsNullOrEmpty(normalizedCurrent)
-                    && !string.Equals(normalizedCurrent, targetName, StringComparison.OrdinalIgnoreCase))
+                // Active auto-session: a target change is a new target block inside the
+                // SAME session (never a new session). Detection runs before the frame is
+                // posted so the frame is attributed to the new target block.
+                if (!string.IsNullOrEmpty(targetName))
                 {
-                    SubframesLogger.Info($"Auto-session boundary: target changed from '{_currentTarget}' to '{targetName}'");
-                    _ = StartAutoSessionAsync(targetName, e, "target change");
+                    var ra  = (e.MetaData?.Target?.Coordinates?.RA ?? 0.0) * 15.0;
+                    var dec = e.MetaData?.Target?.Coordinates?.Dec ?? 0.0;
+                    _ = DetectTargetThenPostFrameAsync(sessionId, e, targetName, ra, dec);
+                    NotifyFrameSaved();
                     return;
                 }
             }
@@ -873,7 +938,9 @@ public sealed class SessionService : IDisposable, IFocuserConsumer, IGuiderConsu
             {
                 var targetRa = (e.MetaData?.Target?.Coordinates?.RA ?? 0.0) * 15.0;
                 var targetDec = e.MetaData?.Target?.Coordinates?.Dec ?? 0.0;
-                _ = OnTargetDetectedAsync(rawTarget, targetRa, targetDec);
+                _ = DetectTargetThenPostFrameAsync(sessionId, e, rawTarget, targetRa, targetDec);
+                NotifyFrameSaved();
+                return;
             }
         }
 
@@ -881,10 +948,36 @@ public sealed class SessionService : IDisposable, IFocuserConsumer, IGuiderConsu
 
         // Fire-and-forget, but capture exceptions so nothing leaks to NINA.
         _ = PostFrameAsync(sessionId, e);
+        NotifyFrameSaved();
+    }
+
+    private void NotifyFrameSaved()
+    {
+        // A frame arriving means imaging resumed — leave "waiting" if we were parked.
+        if (_serverWaiting) _ = ResumeFromWaitingAsync();
 
         // Notify the TS preview state machine that an image was saved.
         // The callback decides (based on state and timing) whether to fetch a new preview.
         _tsPreviewCallback?.Invoke();
+    }
+
+    /// <summary>
+    /// Registers the frame's target (no-op if unchanged) and then posts the frame, so the
+    /// first frame of a new target block carries the new sessionTargetId. Target registration
+    /// is bounded to 10 s so a slow API can never hold a frame back.
+    /// </summary>
+    private async Task DetectTargetThenPostFrameAsync(
+        string sessionId, ImageSavedEventArgs e, string rawTarget, double ra, double dec)
+    {
+        try
+        {
+            await OnTargetDetectedAsync(rawTarget, ra, dec).WaitAsync(TimeSpan.FromSeconds(10)).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            SubframesLogger.Warning($"Target detection before frame post failed: {ex.Message}");
+        }
+        await PostFrameAsync(sessionId, e).ConfigureAwait(false);
     }
 
     private Task PostFrameAsync(string sessionId, ImageSavedEventArgs e)
@@ -1314,18 +1407,30 @@ public sealed class SessionService : IDisposable, IFocuserConsumer, IGuiderConsu
         {
             while (await timer.WaitForNextTickAsync(ct))
             {
-                // Auto-session inactivity timeout
-                if (!_isManualSession && _lastFrameTime != default)
+                // Inactivity: park as "waiting" after SessionTimeoutMinutes; close only after
+                // MaxIdleBeforeCloseMinutes (never split a night on a gap).
                 {
                     var opts = PluginOptions.Load();
-                    if (opts.AutoSessionDetection)
+                    var stoppedAt = _sequenceStoppedAt;
+                    var lastActivity = _lastFrameTime;
+                    if (stoppedAt is { } st && st > lastActivity) lastActivity = st;
+                    if (lastActivity != default && (opts.AutoSessionDetection || stoppedAt is not null))
                     {
-                        var idleMinutes = (DateTime.UtcNow - _lastFrameTime).TotalMinutes;
-                        if (idleMinutes >= opts.SessionTimeoutMinutes)
+                        var idleMinutes = (DateTime.UtcNow - lastActivity).TotalMinutes;
+                        var action = SessionIdlePolicy.Evaluate(
+                            _isManualSession, stoppedAt is not null, _serverWaiting,
+                            idleMinutes, opts.SessionTimeoutMinutes, opts.MaxIdleBeforeCloseMinutes);
+                        if (action == IdleAction.Close)
                         {
-                            SubframesLogger.Info($"Auto-session ended: no frames for {(int)idleMinutes} minutes");
+                            SubframesLogger.Info($"Session closed: idle for {(int)idleMinutes} minutes (max {opts.MaxIdleBeforeCloseMinutes}).");
                             await EndSessionAsync(CancellationToken.None);
                             return;
+                        }
+                        if (action == IdleAction.MarkWaiting)
+                        {
+                            SubframesLogger.Info($"Session waiting: no frames for {(int)idleMinutes} minutes.");
+                            try { await UpdateStatusAsync("waiting", "no frames"); }
+                            catch (Exception ex) { SubframesLogger.Warning($"Mark waiting failed: {ex.Message}"); }
                         }
                     }
                 }

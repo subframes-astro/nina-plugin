@@ -26,6 +26,7 @@
   <ItemGroup>
     <Compile Include="../SubframesPlugin/CatalogNameNormalizer.cs" />
     <Compile Include="../SubframesPlugin/FrameTypeFilter.cs" />
+    <Compile Include="../SubframesPlugin/SessionPolicy.cs" />
     <Compile Include="../SubframesPlugin/Api/Dtos.cs" />
     <Compile Include="../SubframesPlugin/AutofocusEventBuilder.cs" />
     <!-- Guide sample subsystem: compiled directly (no NINA SDK dependencies) -->

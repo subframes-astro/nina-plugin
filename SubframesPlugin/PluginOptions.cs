@@ -63,8 +63,14 @@ public class PluginOptions
     /// <summary>When true, automatically start/end sessions based on target changes and inactivity.</summary>
     public bool AutoSessionDetection { get; set; } = true;
 
-    /// <summary>Minutes of inactivity after which an auto-session is ended (default 30).</summary>
+    /// <summary>Minutes of inactivity after which an auto-session is marked "waiting" (default 30).</summary>
     public int SessionTimeoutMinutes { get; set; } = 30;
+
+    /// <summary>
+    /// Minutes without frames (or since the sequence stopped) after which a "waiting"
+    /// session is finally closed (default 240). Sessions are never split by idle gaps shorter than this.
+    /// </summary>
+    public int MaxIdleBeforeCloseMinutes { get; set; } = 240;
 
     // ── Target Scheduler ─────────────────────────────────────────────────────
 

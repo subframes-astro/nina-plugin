@@ -509,6 +509,8 @@ public class SubframesPlugin : PluginBase, IPluginManifest, IPartImportsSatisfie
             // Session already active (e.g. manual StartSubframesSession ran first).
             // If we found a real target, register it immediately so the web app
             // updates without waiting for the first exposure to complete.
+            // A same-night restart reuses the parked ("waiting") session.
+            _ = _sessionService.ResumeFromWaitingAsync();
             if (!string.IsNullOrWhiteSpace(targetName))
                 _ = _sessionService.OnTargetDetectedAsync(targetName, targetRa, targetDec);
             SubscribeToDsoContainerEvents();
@@ -547,7 +549,17 @@ public class SubframesPlugin : PluginBase, IPluginManifest, IPartImportsSatisfie
                 return Task.CompletedTask;
             }
 
-            SubframesLogger.Info("Sequence run ended - closing active session.");
+            // Before dawn: do NOT end the session. Park it as "waiting" so a restart on the
+            // same night reuses it (keeping planned-target / TS context) instead of splitting
+            // the night. It is closed after dawn, at teardown, or by MaxIdleBeforeCloseMinutes.
+            if (!IsAfterDawn())
+            {
+                SubframesLogger.Info("Sequence ended before dawn - marking session waiting (not ending).");
+                _ = _sessionService.MarkSequenceStoppedAsync();
+                return Task.CompletedTask;
+            }
+
+            SubframesLogger.Info("Sequence run ended after dawn - closing active session.");
             // Preserve the cached preview for the Tonight's Plan post-dawn heartbeat.
             if (_tsPreviewState == TsPreviewState.Active || _tsPreviewState == TsPreviewState.Startup)
             {
@@ -557,6 +569,25 @@ public class SubframesPlugin : PluginBase, IPluginManifest, IPartImportsSatisfie
             _ = _sessionService.EndSessionAsync(CancellationToken.None);
         }
         return Task.CompletedTask;
+    }
+
+    /// <summary>
+    /// True when the active profile's location says dawn has broken. Unknown location or any
+    /// failure returns false (session stays "waiting" and is closed by the max-idle timeout).
+    /// </summary>
+    private bool IsAfterDawn()
+    {
+        try
+        {
+            var ast = _profileService.ActiveProfile?.AstrometrySettings;
+            if (ast is null) return false;
+            return DawnPolicy.IsAfterDawn(ast.Latitude, ast.Longitude, DateTime.UtcNow);
+        }
+        catch (Exception ex)
+        {
+            SubframesLogger.Debug($"IsAfterDawn failed: {ex.Message}");
+            return false;
+        }
     }
 
     /// <summary>
