@@ -801,8 +801,17 @@ public sealed class EndSessionData
 /// <summary>Response payload from POST /api/v1/ingest/session/target/start</summary>
 public sealed class StartSessionTargetData
 {
+    /// <summary>Server target id. The API returns <c>{"data":{"id":...}}</c> (model.SessionTarget).</summary>
+    [JsonPropertyName("id")]
+    public string? Id { get; init; }
+
+    /// <summary>Legacy field name; kept for compatibility.</summary>
     [JsonPropertyName("sessionTargetId")]
     public string? SessionTargetId { get; init; }
+
+    /// <summary>Resolved target id: <c>Id ?? SessionTargetId</c>.</summary>
+    [JsonIgnore]
+    public string? ResolvedId => Id ?? SessionTargetId;
 
     [JsonPropertyName("status")]
     public string? Status { get; init; }

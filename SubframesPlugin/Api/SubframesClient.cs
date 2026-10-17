@@ -309,7 +309,7 @@ public sealed class SubframesClient : IDisposable, IGuideSamplesApi
 
             var envelope = await response.Content
                 .ReadFromJsonAsync<ApiEnvelope<StartSessionTargetData>>(JsonOptions, ct);
-            var targetId = envelope?.Data?.SessionTargetId;
+            var targetId = envelope?.Data?.ResolvedId;
             SubframesLogger.Info($"Target started: {targetId} name='{request.TargetName}'");
             return targetId;
         }
