@@ -38,6 +38,8 @@
     <Compile Include="../SubframesPlugin/Api/DeadLetterStore.cs" />
     <!-- StarAnalysisExtractor: pure reflection, no NINA SDK dependencies -->
     <Compile Include="../SubframesPlugin/Imaging/StarAnalysisExtractor.cs" />
+    <!-- TsReadResult: pure type, no NINA SDK dependencies -->
+    <Compile Include="../SubframesPlugin/TsReadResult.cs" />
   </ItemGroup>
 
 </Project>

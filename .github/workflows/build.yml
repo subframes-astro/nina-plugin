@@ -60,7 +60,9 @@ jobs:
       - name: Restore dependencies
         env:
           NINA_SDK_PATH: ${{ github.workspace }}\nina-sdk
-        run: dotnet restore SubframesPlugin/SubframesPlugin.csproj
+        run: |
+          dotnet restore SubframesPlugin/SubframesPlugin.csproj
+          dotnet restore SubframesPlugin.Tests/SubframesPlugin.Tests.csproj
 
       - name: Build
         env:
