@@ -160,7 +160,7 @@ public class StarAnalysisExtractorTests
         var result = extractor.ExtractForTest(analysis, FakeHfTypeName, "sess-hf-stars-01");
 
         Assert.Equal(2.0, result.Fwhm);
-        Assert.Equal(0.2, result.Eccentricity, precision: 6);
+        Assert.Equal(0.2, result.Eccentricity!.Value, precision: 6);
     }
 
     [Fact]
@@ -183,7 +183,7 @@ public class StarAnalysisExtractorTests
         var result = extractor.ExtractForTest(analysis, FakeHfTypeName, "sess-hf-stars-02");
 
         Assert.Equal(2.5, result.Fwhm);
-        Assert.Equal(0.25, result.Eccentricity, precision: 6);
+        Assert.Equal(0.25, result.Eccentricity!.Value, precision: 6);
     }
 
     [Fact]
@@ -229,7 +229,7 @@ public class StarAnalysisExtractorTests
 
         Assert.Equal(2.0, result.Fwhm);  // median of valid [1.0, 2.0, 3.0]
         // All 5 eccentricities are valid; sorted: [0.1, 0.1, 0.2, 0.2, 0.3] → median = 0.2
-        Assert.Equal(0.2, result.Eccentricity, precision: 6);
+        Assert.Equal(0.2, result.Eccentricity!.Value, precision: 6);
     }
 
     [Fact]

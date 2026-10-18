@@ -212,13 +212,15 @@ public sealed class GuideSampleBatchUploader : IAsyncDisposable
 
         try
         {
-            var (success, finalAttempts) = await UploadWithRetryAsync(request, ct);
+            var (success, finalAttempts, permanent) = await UploadWithRetryAsync(request, ct);
 
             if (!success)
             {
-                SubframesLogger.Error(
-                    $"Exhausted {finalAttempts} retry attempts for {batch.Count} guide samples " +
-                    $"(session {sessionId}); moving to dead-letter store");
+                SubframesLogger.Error(permanent
+                    ? $"Guide sample batch of {batch.Count} permanently rejected after {finalAttempts} attempt(s) " +
+                      $"(session {sessionId}); moving to dead-letter store"
+                    : $"Exhausted {finalAttempts} retry attempts for {batch.Count} guide samples " +
+                      $"(session {sessionId}); moving to dead-letter store");
 
                 DeadLetter("ingest/guide-samples", request, finalAttempts);
             }
@@ -243,10 +245,11 @@ public sealed class GuideSampleBatchUploader : IAsyncDisposable
 
     /// <summary>
     /// Upload with exponential back-off and 429-aware retry.
-    /// Returns <c>(true, attempts)</c> on success, <c>(false, totalAttempts)</c> when all retries
-    /// are exhausted. Permanent failures are dead-lettered immediately and return <c>false</c>.
+    /// Returns <c>(true, attempts, false)</c> on success, <c>(false, totalAttempts, false)</c> when all
+    /// retries are exhausted, and <c>(false, attempt, true)</c> on a permanent 4xx failure.
+    /// This method does NOT dead-letter; the caller is the single owner of dead-lettering.
     /// </summary>
-    private async Task<(bool success, int attempts)> UploadWithRetryAsync(
+    private async Task<(bool success, int attempts, bool permanent)> UploadWithRetryAsync(
         GuideSampleBatchRequest request,
         CancellationToken ct)
     {
@@ -259,7 +262,7 @@ public sealed class GuideSampleBatchUploader : IAsyncDisposable
 
             var result = await _apiClient.PostGuideSamplesAsync(request, ct);
 
-            if (result.IsSuccess) return (true, attempt);
+            if (result.IsSuccess) return (true, attempt, false);
 
             // 429 — rate limited: honour Retry-After or fall back to exponential back-off
             if (result.IsRateLimited)
@@ -289,9 +292,8 @@ public sealed class GuideSampleBatchUploader : IAsyncDisposable
             {
                 SubframesLogger.Warning(
                     $"{endpoint} rejected permanently (HTTP {result.StatusCode}) — " +
-                    $"dead-lettering batch (attempt {attempt}/{_maxRetryAttempts})");
-                DeadLetter(endpoint, request, attempt);
-                return (false, attempt);
+                    $"not retrying (attempt {attempt}/{_maxRetryAttempts})");
+                return (false, attempt, true);
             }
 
             // Transient failure (5xx, network timeout, etc.)
@@ -305,7 +307,7 @@ public sealed class GuideSampleBatchUploader : IAsyncDisposable
             delay = TimeSpan.FromTicks(Math.Min(delay.Ticks * 2, _maxBackoffCeiling.Ticks));
         }
 
-        return (false, _maxRetryAttempts);
+        return (false, _maxRetryAttempts, false);
     }
 
     /// <summary>
