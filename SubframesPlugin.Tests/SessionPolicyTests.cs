@@ -86,6 +86,7 @@ public class SessionPolicyTests
     private sealed class NightSim
     {
         public int SessionsStarted = 1;           // never incremented: target change / gap / restart reuse it
+        public int SessionsEnded;
         public int TargetDetectedCalls;
         public bool ServerWaiting;
         private string? _name; private double _ra, _dec; private bool _hasTarget;
@@ -106,6 +107,32 @@ public class SessionPolicyTests
             Assert.NotEqual(IdleAction.Close, a);
             if (a == IdleAction.MarkWaiting) ServerWaiting = true;
         }
+
+        /// <summary>
+        /// Mirrors Plugin.OnSequenceFinished's dawn gate: before dawn, park the session as
+        /// "waiting" (keeping planned-target / TS context) instead of ending it; after dawn,
+        /// end the session for real so the next sequence start opens a fresh one.
+        /// </summary>
+        public void SequenceFinished(double latitudeDeg, double longitudeDeg, DateTime utcNow)
+        {
+            if (DawnPolicy.IsAfterDawn(latitudeDeg, longitudeDeg, utcNow))
+            {
+                SessionsEnded++;
+                ServerWaiting = false;
+                _hasTarget = false; // a true end drops the target-block context
+            }
+            else
+            {
+                ServerWaiting = true;
+            }
+        }
+
+        /// <summary>Mirrors SessionService.OnSequenceStartedAsync: reuse the parked session
+        /// (do not increment SessionsStarted) when one is still open.</summary>
+        public void SequenceRestarted()
+        {
+            ServerWaiting = false;
+        }
     }
 
     [Fact]
@@ -123,6 +150,53 @@ public class SessionPolicyTests
 
         Assert.Equal(1, sim.SessionsStarted);
         Assert.Equal(4, sim.TargetDetectedCalls); // WR134, sh2-126, M31, WR134
+    }
+
+    // ── Sequence stop/restart gated by dawn (Plugin.OnSequenceFinished) ──────
+
+    [Fact]
+    public void Night_SequenceStopsBeforeDawn_MarksWaiting_RestartReusesSessionAndTargetContext()
+    {
+        var sim = new NightSim();
+        // 32.0,-97.0 at 05:00 UTC = 00:00 CDT: clearly before dawn (see Dawn_Midnight_IsNotAfterDawn).
+        var midnightUtc = new DateTime(2025, 10, 6, 5, 0, 0, DateTimeKind.Utc);
+
+        for (int i = 0; i < 20; i++) sim.Frame("WR134", 305.0, 36.0);
+        sim.SequenceFinished(32.0, -97.0, midnightUtc); // sequence stopped before dawn
+
+        Assert.True(sim.ServerWaiting, "session must be parked 'waiting', not ended, before dawn");
+        Assert.Equal(0, sim.SessionsEnded);
+        Assert.Equal(1, sim.SessionsStarted);
+
+        // Restart ~10 minutes later, same night: reuses the parked session (no new StartSession
+        // call, so planned-target / multi-target context set at the original session start is
+        // untouched) and the first post-restart frame on the SAME target does not re-register.
+        sim.SequenceRestarted();
+        Assert.False(sim.ServerWaiting);
+        Assert.Equal(1, sim.SessionsStarted);
+        Assert.Equal(0, sim.SessionsEnded);
+
+        sim.Frame("WR134", 305.0, 36.0); // same block resumes — no extra target-detected call
+        Assert.Equal(1, sim.TargetDetectedCalls);
+
+        for (int i = 0; i < 5; i++) sim.Frame("M31", 10.68, 41.27); // new block after restart
+        Assert.Equal(2, sim.TargetDetectedCalls);
+        Assert.Equal(1, sim.SessionsStarted);
+        Assert.Equal(0, sim.SessionsEnded);
+    }
+
+    [Fact]
+    public void Night_SequenceFinishesAfterDawn_EndsSession()
+    {
+        var sim = new NightSim();
+        // 32.0,-97.0 at 14:00 UTC = 09:00 CDT: after dawn (see Dawn_MidMorning_IsAfterDawn).
+        var midMorningUtc = new DateTime(2025, 10, 6, 14, 0, 0, DateTimeKind.Utc);
+
+        for (int i = 0; i < 10; i++) sim.Frame("NGC 40", 12.0, 72.0);
+        sim.SequenceFinished(32.0, -97.0, midMorningUtc);
+
+        Assert.False(sim.ServerWaiting, "a post-dawn finish is a real end, not 'waiting'");
+        Assert.Equal(1, sim.SessionsEnded);
     }
 
     [Fact]
