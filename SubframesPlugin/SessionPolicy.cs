@@ -103,3 +103,38 @@ public static class DawnPolicy
         return (Math.Asin(Math.Clamp(sinEl, -1, 1)) * 180.0 / Math.PI, solarHour);
     }
 }
+
+/// <summary>
+/// Collapses cached target rows into target blocks for offline replay (SUB-2216).
+/// Older plugin builds cached one unacked <c>cached_targets</c> row per exposure while the
+/// API was unreachable; replaying them verbatim at session end produced one target-start per
+/// exposure with historical start times.
+/// </summary>
+public static class TargetReplayPlanner
+{
+    /// <summary>
+    /// Returns, for each input index, the index of the block leader (first row of a run of
+    /// consecutive rows that are the same target by name + coordinates).
+    /// </summary>
+    public static int[] GroupLeaders(
+        IReadOnlyList<(string? Name, double Ra, double Dec)> rows)
+    {
+        var leaders = new int[rows.Count];
+        int leader = -1;
+        for (int i = 0; i < rows.Count; i++)
+        {
+            if (leader >= 0 && TargetBlockPolicy.IsSameTarget(
+                    true, rows[leader].Name, rows[leader].Ra, rows[leader].Dec,
+                    rows[i].Name, rows[i].Ra, rows[i].Dec))
+            {
+                leaders[i] = leader;
+            }
+            else
+            {
+                leader = i;
+                leaders[i] = i;
+            }
+        }
+        return leaders;
+    }
+}

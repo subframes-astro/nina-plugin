@@ -230,12 +230,35 @@ public sealed class CacheReplayEngine : IDisposable
 
         // 2. Replay unacked targets.
         var targets = _cache.GetTargetsForSession(session.LocalId);
-        foreach (var target in targets)
+
+        // Collapse runs of the same target into one block (SUB-2216): legacy caches hold one
+        // unacked row per exposure. Only the block leader is announced; followers inherit its
+        // server id and are marked acked so they are never re-sent.
+        var parsed = targets.Select(t => DeserializeOrNull<StartSessionTargetRequest>(t.StartJson)).ToList();
+        var leaders = TargetReplayPlanner.GroupLeaders(
+            parsed.Select(r => (r?.TargetName, r?.TargetRa ?? 0, r?.TargetDec ?? 0)).ToList());
+        var leaderServerIds = new Dictionary<int, string>();
+
+        for (int i = 0; i < targets.Count; i++)
         {
             if (ct.IsCancellationRequested) return;
-            if (target.ServerAck) continue;
+            var target = targets[i];
+            var req = parsed[i];
+            int lead = leaders[i];
 
-            var req = DeserializeOrNull<StartSessionTargetRequest>(target.StartJson);
+            if (lead != i)
+            {
+                // Follower of an earlier row in the same block.
+                if (!target.ServerAck && leaderServerIds.TryGetValue(lead, out var leadId))
+                    _cache.MarkTargetAcked(target.LocalId, leadId);
+                continue;
+            }
+
+            if (target.ServerAck)
+            {
+                if (target.ServerId is not null) leaderServerIds[i] = target.ServerId;
+                continue;
+            }
             if (req is null) continue;
 
             // Bind to the now-known server session ID.
@@ -246,17 +269,23 @@ public sealed class CacheReplayEngine : IDisposable
 
             if (targetServerId is not null)
             {
+                leaderServerIds[i] = targetServerId;
                 _cache.MarkTargetAcked(target.LocalId, targetServerId);
 
-                // Send EndTarget if the target was closed locally.
-                if (target.EndedLocally && target.EndTime is not null)
+                // End time of the block = last ended row in the run.
+                var endTime = target.EndTime;
+                for (int j = i + 1; j < targets.Count && leaders[j] == i; j++)
+                    if (targets[j].EndedLocally && targets[j].EndTime is not null) endTime = targets[j].EndTime;
+                bool ended = (target.EndedLocally || endTime != target.EndTime) && endTime is not null;
+
+                if (ended)
                 {
                     await AcquireTokenAsync(ct);
                     await _apiClient.EndTargetAsync(new EndSessionTargetRequest
                     {
                         SessionId       = serverId,
                         SessionTargetId = targetServerId,
-                        EndTime         = target.EndTime,
+                        EndTime         = endTime,
                     }, ct);
                 }
             }
